@@ -1,0 +1,10 @@
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/uninstall.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/aruco_vision_uninstall.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/aruco_detector_node.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/test.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/edit_cache.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/rebuild_cache.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/list_install_components.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/install.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/install/local.dir
+/home/oit/ros2_ws/src/build/aruco_vision/CMakeFiles/install/strip.dir

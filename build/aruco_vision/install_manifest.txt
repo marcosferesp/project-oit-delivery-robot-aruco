@@ -1,0 +1,16 @@
+/home/oit/ros2_ws/src/install/aruco_vision/lib/aruco_vision/aruco_detector_node
+/home/oit/ros2_ws/src/install/aruco_vision/share/ament_index/resource_index/package_run_dependencies/aruco_vision
+/home/oit/ros2_ws/src/install/aruco_vision/share/ament_index/resource_index/parent_prefix_path/aruco_vision
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/environment/ament_prefix_path.sh
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/environment/ament_prefix_path.dsv
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/environment/path.sh
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/environment/path.dsv
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/local_setup.bash
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/local_setup.sh
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/local_setup.zsh
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/local_setup.dsv
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/package.dsv
+/home/oit/ros2_ws/src/install/aruco_vision/share/ament_index/resource_index/packages/aruco_vision
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/cmake/aruco_visionConfig.cmake
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/cmake/aruco_visionConfig-version.cmake
+/home/oit/ros2_ws/src/install/aruco_vision/share/aruco_vision/package.xml

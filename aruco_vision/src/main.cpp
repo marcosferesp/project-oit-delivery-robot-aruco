@@ -1,3 +1,11 @@
+/*
+ * ==============================================================================
+ * main.cpp
+ * Initializes the ROS 2 system and keeps the ArUco detector node running continuously
+ * Author : Marcos Ferrando España
+ * ==============================================================================
+ */
+
 #include "rclcpp/rclcpp.hpp"
 #include "aruco_vision/aruco_detector.hpp"
 
