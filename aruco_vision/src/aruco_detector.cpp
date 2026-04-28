@@ -6,7 +6,7 @@
  * ==============================================================================
  */
 
-#include "aruco_vision/aruco_detector.hpp"
+#include "aruco_detector.hpp"
 
 /* 
  * Constructor ArucoDetectorNode
