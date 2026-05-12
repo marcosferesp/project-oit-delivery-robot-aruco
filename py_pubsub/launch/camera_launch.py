@@ -15,7 +15,19 @@ def generate_launch_description():
             name='camera_node',
             parameters=[{
                 'image_size': [640, 480],
-                'video_device': '/dev/video2'
+                'video_device':'/dev/video1',
+                'camera_frame_id': 'camera_link_optical'
             }]
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='camera_tf_publisher',
+            arguments=[
+                '0.0', '0.0', '0.40',
+                '0.0', '0.0', '0.0',
+                'base_link',
+                'camera_link_optical'
+            ]
         )
     ])

@@ -21,6 +21,9 @@ ArucoDetectorNode::ArucoDetectorNode() : Node("aruco_detector_node"), got_camera
     // Opens a subscriber channel on "/image_raw" with a queue size of 10 to imageCallback.
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>( "/image_raw", 10, std::bind(&ArucoDetectorNode::imageCallback, this, std::placeholders::_1) );
 
+    // Distance Publisher
+    dist_pub_ = this->create_publisher<std_msgs::msg::Float32>("/aruco_distance", 10);
+
     RCLCPP_INFO(this->get_logger(), "ArUco Brain is online and waiting for video...");
 }
 
@@ -84,6 +87,9 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
         for (size_t i = 0; i < markerIds.size(); i++) {
             double distance = tvecs[i][2]; 
             RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away", markerIds[i], distance);
+            std_msgs::msg::Float32 dist_msg;
+            dist_msg.data = distance;
+            dist_pub_->publish(dist_msg);
         }
     }
 }

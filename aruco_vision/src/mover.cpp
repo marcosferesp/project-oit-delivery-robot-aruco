@@ -87,6 +87,7 @@ void ArucoFollowerNode::ctrlLoop() {
     bool aruco_visible = (now - time).seconds() < 2.0;
 
     if (!aruco_visible) {
+        RCLCPP_INFO(this->get_logger(), "ArUco not visible ==> IDLE state");
         rs = ROBOT_IDLE;
     }
     
@@ -94,9 +95,11 @@ void ArucoFollowerNode::ctrlLoop() {
         case ROBOT_IDLE:
             message.linear.x = 0.0;
             message.angular.z = 0.0;
-            if (dist <= 0.30) {
+            if (dist <= 0.50) {
+                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> PARK state", dist);
                 rs = ROBOT_PARK;
-            } else if (dist >= 0.35) {
+            } else if (dist >= 0.55) {
+                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> MOVE state", dist);
                 rs = ROBOT_MOVE;
             } else {
                 rs = ROBOT_IDLE;
@@ -104,17 +107,19 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
 
         case ROBOT_MOVE:
-            message.linear.x = 0.1;
+            message.linear.x = 0.2;
             message.angular.z = 0.0;
-            if (dist <= 0.30) {
+            if (dist <= 0.50) {
+                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> PARK state", dist);
                 rs = ROBOT_PARK;
             }
             break;
 
         case ROBOT_PARK:
-            message.linear.x = 0.1;
+            message.linear.x = 0.0;
             message.angular.z = 0.0;
-            if (dist >= 0.35) {
+            if (dist >= 0.55) {
+                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> MOVE state", dist);
                 rs = ROBOT_MOVE;
             }
     

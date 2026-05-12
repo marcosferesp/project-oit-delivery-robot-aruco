@@ -14,6 +14,7 @@
 #include "cv_bridge/cv_bridge.hpp"
 #include "opencv2/opencv.hpp"
 #include "opencv2/aruco.hpp"
+#include "std_msgs/msg/float32.hpp"
 
 
 /* 
@@ -28,6 +29,9 @@ private:
     // Callbacks
     void infoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);       // Triggered whenever the camera broadcasts its .yaml calibration data
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);           // Triggered 30 times a second (30 Hz) whenever a new video frame arrives
+
+    // Publisher
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr dist_pub_;
 
     // Subscriptions
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr info_sub_;    // Subscribes to the camera's lens calibration data

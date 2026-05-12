@@ -51,6 +51,7 @@ ament_target_dependencies(aruco_detector_node
   geometry_msgs
   image_transport
   OpenCV
+  std_msgs
 )
 
 #MoverNode #ArucoFollowerNode
