@@ -16,6 +16,7 @@ find_package(cv_bridge REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(std_msgs REQUIRED)
 
 ###################################
 # PART 2 : Include the Header Files
@@ -33,7 +34,7 @@ add_executable(aruco_detector_node
   src/aruco_detector.cpp
 )
 
-#MoverNode
+#MoverNode #ArucoFollowerNode
 add_executable(mover 
   src/mover.cpp
 )
@@ -52,10 +53,11 @@ ament_target_dependencies(aruco_detector_node
   OpenCV
 )
 
-#MoverNode
+#MoverNode #ArucoFollowerNode
 ament_target_dependencies(mover
   rclcpp
   geometry_msgs
+  std_msgs
 )
 
 ###################################
