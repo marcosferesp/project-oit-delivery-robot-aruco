@@ -24,8 +24,8 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='camera_tf_publisher',
             arguments=[
-                '0.0', '0.0', '0.40',
-                '0.0', '0.0', '0.0',
+                '0.0', '0.0', '0.50',       # Distance according to wheels in (x,y,z)
+                '0.0', '-1.5708', '0.0',    # -90 degrees because the camera is now facing upstairs
                 'base_link',
                 'camera_link_optical'
             ]

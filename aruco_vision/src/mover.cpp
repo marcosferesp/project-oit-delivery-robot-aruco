@@ -52,9 +52,9 @@ void MoverNode::moveCallback() {
  * Inputs :
  * Output :
  */
-ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_IDLE), dist(0.0) {
+ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_IDLE) {
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-    dist_sub_ = this->create_subscription<std_msgs::msg::Float32>( "/aruco_distance", 10, std::bind(&ArucoFollowerNode::distanceCallback, this, std::placeholders::_1) );
+    coord_sub_ = this->create_subscription<geometry_msgs::msg::Point>("/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::coordCallback, this, std::placeholders::_1));
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
 
     time = this->now();
@@ -62,14 +62,26 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
 
+// /* 
+//  * Function distanceCallback
+//  * Triggers whenever a new distance measurement is published by the camera
+//  * Inputs : msg (std_msgs::msg::Float32::SharedPtr) : the distance data
+//  * Output :
+//  */
+// void ArucoFollowerNode::distanceCallback(const std_msgs::msg::Float32::SharedPtr msg) {
+//     dist = msg->data;
+//     time = this->now();
+// }
+
 /* 
- * Function distanceCallback
- * Triggers whenever a new distance measurement is published by the camera
+ * Function coordCallback
+ * Triggers whenever new x and y coordinates are published by the camera
  * Inputs : msg (std_msgs::msg::Float32::SharedPtr) : the distance data
  * Output :
  */
-void ArucoFollowerNode::distanceCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-    dist = msg->data;
+void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
+    target_x = msg->x;
+    target_y = msg->y;
     time = this->now();
 }
 
@@ -79,6 +91,7 @@ void ArucoFollowerNode::distanceCallback(const std_msgs::msg::Float32::SharedPtr
  * Inputs :
  * Output :
  */
+/*
 void ArucoFollowerNode::ctrlLoop() {
     auto message = geometry_msgs::msg::Twist();
     auto now = this->now();
@@ -125,6 +138,70 @@ void ArucoFollowerNode::ctrlLoop() {
     
         default:
             break;
+    }
+
+    cmd_pub_->publish(message);
+}
+*/
+
+#define X_LIMIT_DOWN    310.0
+#define X_LIMIT_UP      330.0
+#define Y_LIMIT_DOWN    230.0
+#define Y_LIMIT_UP      250.0
+
+/* Function ctrlLoop
+ */
+void ArucoFollowerNode::ctrlLoop() {
+    auto message = geometry_msgs::msg::Twist();
+    auto now = this->now();
+
+    // If 1 second passes with no new data, we lost the marker
+    bool aruco_visible = (now - time).seconds() < 1.0;
+
+    // The robot is perfectly parked ONLY if both X and Y are in the center zone
+    bool needs_park = (target_x >= X_LIMIT_DOWN && target_x <= X_LIMIT_UP) && (target_y >= Y_LIMIT_DOWN && target_y <= Y_LIMIT_UP);             // Around X=320, Y=240
+    bool needs_move = (target_x < X_LIMIT_DOWN-5.0 || target_x > X_LIMIT_UP+5.0) || (target_y < Y_LIMIT_DOWN-5.0 || target_y > Y_LIMIT_UP+5.0); // Hysteresis
+
+    if (!aruco_visible) {
+        rs = ROBOT_IDLE;
+    }
+
+    switch (rs) {
+        case ROBOT_IDLE:
+            if (aruco_visible && needs_move) {
+                rs = ROBOT_MOVE;
+            } else if (aruco_visible && needs_park) {
+                rs = ROBOT_PARK;
+            }
+            break;
+
+        case ROBOT_MOVE:
+            if (needs_park) {
+                rs = ROBOT_PARK;
+            }
+            break;
+
+        case ROBOT_PARK:
+            if (needs_move) {
+                rs = ROBOT_MOVE;
+            }
+            break;
+    }
+
+    message.linear.x = 0.0;
+    message.angular.z = 0.0;
+
+    if (rs == ROBOT_MOVE) {
+        if (target_x < X_LIMIT_DOWN && target_x > X_LIMIT_UP)
+            message.angular.z = (320.0 - target_x) * 0.002;
+
+        if (target_x > 280.0 && target_x < 360.0) {
+            if (target_y < 230.0) {
+                message.linear.x = 0.1;   // Forward
+            } else if (target_y > 250.0) {
+                message.linear.x = -0.1;  // Reverse
+            }
+        }
     }
 
     cmd_pub_->publish(message);

@@ -22,7 +22,8 @@ ArucoDetectorNode::ArucoDetectorNode() : Node("aruco_detector_node"), got_camera
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>( "/image_raw", 10, std::bind(&ArucoDetectorNode::imageCallback, this, std::placeholders::_1) );
 
     // Distance Publisher
-    dist_pub_ = this->create_publisher<std_msgs::msg::Float32>("/aruco_distance", 10);
+    // dist_pub_ = this->create_publisher<std_msgs::msg::Float32>("/aruco_distance", 10);
+    coord_pub_ = this->create_publisher<geometry_msgs::msg::Point>("/aruco_coordinates", 10);
 
     RCLCPP_INFO(this->get_logger(), "ArUco Brain is online and waiting for video...");
 }
@@ -79,17 +80,26 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
     // Scans the image, finds the squares and decodes the internal grid
     cv::aruco::detectMarkers(cv_ptr->image, dictionary, markerCorners, markerIds);
 
+    double distance = 0.0;
+    float center_x = 0.0, center_y = 0.0;
+    geometry_msgs::msg::Point coord_msg;
+
     if (markerIds.size() > 0) {
         std::vector<cv::Vec3d> rvecs, tvecs;
         cv::aruco::estimatePoseSingleMarkers(markerCorners, 0.10, camera_matrix_, dist_coeffs_, rvecs, tvecs);  // The markers are 10cm squared
 
         // If it scans multiple markers it prints them one after another
         for (size_t i = 0; i < markerIds.size(); i++) {
-            double distance = tvecs[i][2]; 
-            RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away", markerIds[i], distance);
-            std_msgs::msg::Float32 dist_msg;
-            dist_msg.data = distance;
-            dist_pub_->publish(dist_msg);
+            distance = tvecs[i][2];
+
+            // Average the 4 corners to find the exact center pixel of the marker
+            center_x = (markerCorners[0][0].x + markerCorners[0][1].x + markerCorners[0][2].x + markerCorners[0][3].x) / 4.0;
+            center_y = (markerCorners[0][0].y + markerCorners[0][1].y + markerCorners[0][2].y + markerCorners[0][3].y) / 4.0;
+            coord_msg.x = center_x;
+            coord_msg.y = center_y;
+            coord_pub_->publish(coord_msg);
+
+            RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away (center at X=%.1f, Y=%.1f)", markerIds[i], distance, center_x, center_y);
         }
     }
 }

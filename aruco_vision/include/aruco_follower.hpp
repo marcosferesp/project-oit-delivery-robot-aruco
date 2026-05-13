@@ -11,6 +11,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "geometry_msgs/msg/point.hpp"
 
 typedef enum {
     ROBOT_IDLE = 0,
@@ -31,20 +32,24 @@ private:
     void ctrlLoop();
 
     // Callbacks
-    void distanceCallback(const std_msgs::msg::Float32::SharedPtr msg);
+    // void distanceCallback(const std_msgs::msg::Float32::SharedPtr msg);
+    void coordCallback(const geometry_msgs::msg::Point::SharedPtr msg);
 
     // Publisher
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
     // Subscriber
-    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr dist_sub_;
+    // rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr dist_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
 
     // Timer
     rclcpp::TimerBase::SharedPtr timer_;
 
     // Variables
     robot_state_t rs;
-    float dist;
+    // float dist;
+    float target_x;
+    float target_y;
     rclcpp::Time time;
 };
 
