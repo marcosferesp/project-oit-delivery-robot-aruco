@@ -155,8 +155,8 @@ void ArucoFollowerNode::ctrlLoop() {
     bool aruco_visible = (now - time).seconds() < 1.0;
 
     // The robot is perfectly parked ONLY if both X and Y are in the center zone
-    bool needs_park = (target_x >= X_PARK-10.0 && target_x <= X_PARK+10.0) && (target_y >= Y_PARK-10.0 && target_y <= Y_PARK+10.0); // Around X=320, Y=240
-    bool needs_move = (target_x < X_PARK-15.0 || target_x > X_PARK+15.0) || (target_y < Y_PARK-15.0 || target_y > Y_PARK+15.0);     // Hysteresis
+    bool y_fixed = (target_y >= Y_PARK-10.0 && target_y <= Y_PARK+10.0);
+    bool x_fixed = (target_x >= X_PARK-10.0 && target_x <= X_PARK+10.0);
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
@@ -164,22 +164,38 @@ void ArucoFollowerNode::ctrlLoop() {
 
     switch (rs) {
         case ROBOT_IDLE:
-            if (aruco_visible && needs_move) {
-                rs = ROBOT_MOVE;
-            } else if (aruco_visible && needs_park) {
-                rs = ROBOT_PARK;
+            if (aruco_visible) {
+                if (!y_fixed) {
+                    rs = ROBOT_FIX_Y;
+                } else if (!x_fixed) {
+                    rs = ROBOT_FIX_X;
+                } else {
+                    rs = ROBOT_PARK;
+                }
             }
             break;
 
-        case ROBOT_MOVE:
-            if (needs_park) {
-                rs = ROBOT_PARK;
+        case ROBOT_FIX_Y:
+            if (y_fixed) {
+                if (!x_fixed) rs = ROBOT_FIX_X;
+                else rs = ROBOT_PARK;
+            }
+            break;
+
+        case ROBOT_FIX_X:
+            if (x_fixed) {
+                if (!y_fixed) rs = ROBOT_FIX_Y;
+                else rs = ROBOT_PARK;
             }
             break;
 
         case ROBOT_PARK:
-            if (needs_move) {
-                rs = ROBOT_MOVE;
+            if (!y_fixed) {
+                rs = ROBOT_FIX_Y;
+            } else if (!x_fixed) {
+                rs = ROBOT_FIX_X;
+            } else {
+                rs = ROBOT_PARK;
             }
             break;
     }
@@ -187,24 +203,21 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    if (rs == ROBOT_MOVE) {
-        message.linear.x = (Y_PARK - target_y) * 0.001;
-        message.angular.z = (X_PARK - target_x) * 0.002;
-
-        // If the robot arrived to Y coordinate, message.linear.x ~ 0 so the robot won't move anymore
-        // If the robot is not at the X wanted coordinate
-        if (target_x < X_PARK-10.0 || target_x > X_PARK+10.0) {
-            // And if message.linear.x ~ 0, it still needs to move forward or backward
-            if (message.linear.x > -0.1 && message.linear.x < 0.1) {
-                if (target_y <= 240.0) {
-                    message.linear.x = 0.1; 
-                } else {
-                    message.linear.x = -0.1;
-                }
-            }
+    if( rs == ROBOT_FIX_Y ){
+        if (target_y < Y_PARK) {
+            message.linear.x = 0.1;   // Forward
+        } else if (target_y > Y_PARK) {
+            message.linear.x = -0.1;  // Backward
+        }
+    } else if( rs == ROBOT_FIX_X ){
+        message.linear.x = 0.1;
+        if (target_x < X_PARK) {
+            message.angular.z = 0.2;  // Spin Left
+        } else if (target_x > X_PARK) {
+            message.angular.z = -0.2; // Spin Right
         }
     }
-
+    
     cmd_pub_->publish(message);
 }
 

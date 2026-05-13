@@ -14,8 +14,9 @@
 #include "geometry_msgs/msg/point.hpp"
 
 typedef enum {
-    ROBOT_IDLE = 0,
-    ROBOT_MOVE,
+    ROBOT_IDLE,
+    ROBOT_FIX_Y,
+    ROBOT_FIX_X,
     ROBOT_PARK
 } robot_state_t;
 
