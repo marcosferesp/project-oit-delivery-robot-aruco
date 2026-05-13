@@ -205,16 +205,15 @@ void ArucoFollowerNode::ctrlLoop() {
 
     if( rs == ROBOT_FIX_Y ){
         if (target_y < Y_PARK) {
-            message.linear.x = 0.1;   // Forward
+            message.linear.x = 0.1;     // Forward
         } else if (target_y > Y_PARK) {
-            message.linear.x = -0.1;  // Backward
+            message.linear.x = -0.1;    // Backward
         }
     } else if( rs == ROBOT_FIX_X ){
-        message.linear.x = 0.1;
         if (target_x < X_PARK) {
-            message.angular.z = 0.2;  // Spin Left
+            message.angular.z = -0.2;   // Spin Right
         } else if (target_x > X_PARK) {
-            message.angular.z = -0.2; // Spin Right
+            message.angular.z = 0.2;    // Spin Left
         }
     }
     
