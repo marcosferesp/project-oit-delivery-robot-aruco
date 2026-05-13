@@ -144,13 +144,9 @@ void ArucoFollowerNode::ctrlLoop() {
 }
 */
 
-#define X_LIMIT_DOWN    310.0
-#define X_LIMIT_UP      330.0
-#define Y_LIMIT_DOWN    230.0
-#define Y_LIMIT_UP      250.0
+#define X_PARK 320.0
+#define Y_PARK 240.0
 
-/* Function ctrlLoop
- */
 void ArucoFollowerNode::ctrlLoop() {
     auto message = geometry_msgs::msg::Twist();
     auto now = this->now();
@@ -159,8 +155,8 @@ void ArucoFollowerNode::ctrlLoop() {
     bool aruco_visible = (now - time).seconds() < 1.0;
 
     // The robot is perfectly parked ONLY if both X and Y are in the center zone
-    bool needs_park = (target_x >= X_LIMIT_DOWN && target_x <= X_LIMIT_UP) && (target_y >= Y_LIMIT_DOWN && target_y <= Y_LIMIT_UP);             // Around X=320, Y=240
-    bool needs_move = (target_x < X_LIMIT_DOWN-5.0 || target_x > X_LIMIT_UP+5.0) || (target_y < Y_LIMIT_DOWN-5.0 || target_y > Y_LIMIT_UP+5.0); // Hysteresis
+    bool needs_park = (target_x >= X_PARK-10.0 && target_x <= X_PARK+10.0) && (target_y >= Y_PARK-10.0 && target_y <= Y_PARK+10.0); // Around X=320, Y=240
+    bool needs_move = (target_x < X_PARK-15.0 || target_x > X_PARK+15.0) || (target_y < Y_PARK-15.0 || target_y > Y_PARK+15.0);     // Hysteresis
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
@@ -192,14 +188,19 @@ void ArucoFollowerNode::ctrlLoop() {
     message.angular.z = 0.0;
 
     if (rs == ROBOT_MOVE) {
-        if (target_x < X_LIMIT_DOWN && target_x > X_LIMIT_UP)
-            message.angular.z = (320.0 - target_x) * 0.002;
+        message.linear.x = (Y_PARK - target_y) * 0.001;
+        message.angular.z = (X_PARK - target_x) * 0.002;
 
-        if (target_x > 280.0 && target_x < 360.0) {
-            if (target_y < 230.0) {
-                message.linear.x = 0.1;   // Forward
-            } else if (target_y > 250.0) {
-                message.linear.x = -0.1;  // Reverse
+        // If the robot arrived to Y coordinate, message.linear.x ~ 0 so the robot won't move anymore
+        // If the robot is not at the X wanted coordinate
+        if (target_x < X_PARK-10.0 || target_x > X_PARK+10.0) {
+            // And if message.linear.x ~ 0, it still needs to move forward or backward
+            if (message.linear.x > -0.1 && message.linear.x < 0.1) {
+                if (target_y <= 240.0) {
+                    message.linear.x = 0.1; 
+                } else {
+                    message.linear.x = -0.1;
+                }
             }
         }
     }
