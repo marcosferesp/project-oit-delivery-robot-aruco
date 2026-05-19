@@ -85,68 +85,15 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
     time = this->now();
 }
 
+#define X_PARK 320.0
+#define Y_PARK 240.0
+
 /* 
  * Function ctrlLoop
  * Evaluates the robot's current state and sends motor commands
  * Inputs :
  * Output :
  */
-/*
-void ArucoFollowerNode::ctrlLoop() {
-    auto message = geometry_msgs::msg::Twist();
-    auto now = this->now();
-
-    // If 2 seconds pass with no new distance data we consider there is no marker
-    bool aruco_visible = (now - time).seconds() < 2.0;
-
-    if (!aruco_visible) {
-        RCLCPP_INFO(this->get_logger(), "ArUco not visible ==> IDLE state");
-        rs = ROBOT_IDLE;
-    }
-    
-    switch (rs) {
-        case ROBOT_IDLE:
-            message.linear.x = 0.0;
-            message.angular.z = 0.0;
-            if (dist <= 0.50) {
-                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> PARK state", dist);
-                rs = ROBOT_PARK;
-            } else if (dist >= 0.55) {
-                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> MOVE state", dist);
-                rs = ROBOT_MOVE;
-            } else {
-                rs = ROBOT_IDLE;
-            }
-            break;
-
-        case ROBOT_MOVE:
-            message.linear.x = 0.2;
-            message.angular.z = 0.0;
-            if (dist <= 0.50) {
-                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> PARK state", dist);
-                rs = ROBOT_PARK;
-            }
-            break;
-
-        case ROBOT_PARK:
-            message.linear.x = 0.0;
-            message.angular.z = 0.0;
-            if (dist >= 0.55) {
-                RCLCPP_INFO(this->get_logger(), "Distance %.2f ==> MOVE state", dist);
-                rs = ROBOT_MOVE;
-            }
-    
-        default:
-            break;
-    }
-
-    cmd_pub_->publish(message);
-}
-*/
-
-#define X_PARK 320.0
-#define Y_PARK 240.0
-
 void ArucoFollowerNode::ctrlLoop() {
     auto message = geometry_msgs::msg::Twist();
     auto now = this->now();

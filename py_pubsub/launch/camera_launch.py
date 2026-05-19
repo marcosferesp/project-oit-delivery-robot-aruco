@@ -4,19 +4,28 @@
 # Author : Author : Marcos Ferrando España
 # ==============================================================================
 
+import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    config_dir = os.path.join(
+        get_package_share_directory('py_pubsub'),
+        'config',
+        'logitech_streamcam_1080p.yaml'
+    )
+
     return LaunchDescription([
         Node(
             package='v4l2_camera',
             executable='v4l2_camera_node',
             name='camera_node',
             parameters=[{
-                'image_size': [640, 480],
-                'video_device':'/dev/video1',
-                'camera_frame_id': 'camera_link_optical'
+                'image_size': [1920, 1080],
+                'video_device':'/dev/video2',
+                'camera_frame_id': 'camera_link_optical',
+                'camera_info_url': f'file://{config_dir}'
             }]
         ),
         Node(
