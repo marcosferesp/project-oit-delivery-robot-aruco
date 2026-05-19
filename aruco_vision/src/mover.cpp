@@ -90,6 +90,8 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
 #define Y_PARK 540.0
 #define UNCERTAINTY 20.0
 #define HYSTERESIS 60.0
+#define ANGLE_PARK 0.1
+#define ANGLE_HYST 0.2
 
 /* 
  * Function ctrlLoop
@@ -113,7 +115,8 @@ void ArucoFollowerNode::ctrlLoop() {
     bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
 
     // The robot is aligned if the angle is close to 0.0 radians
-    bool angle_fixed = (target_angle >= -0.1 && target_angle <= 0.1);
+    bool angle_fixed = (target_angle >= -ANGLE_PARK && target_angle <= ANGLE_PARK);
+    bool angle_hyst = (target_angle >= -ANGLE_HYST && target_angle <= ANGLE_HYST);
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
@@ -135,24 +138,14 @@ void ArucoFollowerNode::ctrlLoop() {
         case ROBOT_FIX_Y:
             if (y_fixed) {
                 if (!x_fixed) rs = ROBOT_FIX_X;
-                else rs = ROBOT_ALIGN;
+                else rs = ROBOT_PARK;
             }
             break;
 
         case ROBOT_FIX_X:
             if (x_fixed) {
                 if (!y_fixed) rs = ROBOT_FIX_Y;
-                else rs = ROBOT_ALIGN;
-            }
-            break;
-
-        case ROBOT_ALIGN:
-            if (!y_fixed) {
-                rs = ROBOT_FIX_Y;
-            } else if (!x_fixed) {
-                rs = ROBOT_FIX_X;
-            } else if (angle_fixed) {
-                rs = ROBOT_PARK;
+                else rs = ROBOT_PARK;
             }
             break;
 
@@ -162,7 +155,19 @@ void ArucoFollowerNode::ctrlLoop() {
             } else if (!x_hyst) {
                 rs = ROBOT_FIX_X;
             } else {
-                rs = ROBOT_PARK;
+                rs = ROBOT_ALIGN;
+            }
+            break;
+
+        case ROBOT_ALIGN:
+            if (angle_fixed) {
+                rs = ROBOT_PARK_ALIGNED;
+            }
+            break;
+
+        case ROBOT_PARK_ALIGNED:
+            if (!angle_hyst) {
+                rs = ROBOT_ALIGN;
             }
             break;
 

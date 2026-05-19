@@ -17,8 +17,9 @@ typedef enum {
     ROBOT_IDLE,
     ROBOT_FIX_Y,
     ROBOT_FIX_X,
+    ROBOT_PARK,
     ROBOT_ALIGN,
-    ROBOT_PARK
+    ROBOT_PARK_ALIGNED
 } robot_state_t;
 
 /* 
