@@ -112,6 +112,9 @@ void ArucoFollowerNode::ctrlLoop() {
     bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
     bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
 
+    // The robot is aligned if the angle is close to 0.0 radians
+    bool angle_fixed = (target_angle >= -0.1 && target_angle <= 0.1);
+
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
     }
@@ -148,7 +151,7 @@ void ArucoFollowerNode::ctrlLoop() {
                 rs = ROBOT_FIX_Y;
             } else if (!x_fixed) {
                 rs = ROBOT_FIX_X;
-            } else {
+            } else if (angle_fixed) {
                 rs = ROBOT_PARK;
             }
             break;
@@ -191,8 +194,12 @@ void ArucoFollowerNode::ctrlLoop() {
         error_angle = atan2(sin(error_angle), cos(error_angle));
         if (error_angle > 0.1) {
             message.angular.z = 0.2;
+            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating LEFT", error_angle);
         } else if (error_angle < -0.1) {
             message.angular.z = -0.2;
+            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating RIGHT", error_angle);
+        } else {
+            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> ALIGNED!", error_angle);
         }
     }
     
