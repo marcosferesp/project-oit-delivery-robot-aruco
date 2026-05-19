@@ -17,6 +17,7 @@ typedef enum {
     ROBOT_IDLE,
     ROBOT_FIX_Y,
     ROBOT_FIX_X,
+    ROBOT_ALIGN,
     ROBOT_PARK
 } robot_state_t;
 
@@ -51,6 +52,7 @@ private:
     // float dist;
     float target_x;
     float target_y;
+    float target_angle;
     rclcpp::Time time;
 };
 

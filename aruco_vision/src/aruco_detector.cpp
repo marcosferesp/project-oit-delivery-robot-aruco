@@ -81,7 +81,7 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
     cv::aruco::detectMarkers(cv_ptr->image, dictionary, markerCorners, markerIds);
 
     double distance = 0.0;
-    float center_x = 0.0, center_y = 0.0;
+    float center_x = 0.0, center_y = 0.0, dx = 0.0, dy = 0.0, marker_angle = 0.0;
     geometry_msgs::msg::Point coord_msg;
 
     if (markerIds.size() > 0) {
@@ -97,6 +97,13 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
             center_y = (markerCorners[0][0].y + markerCorners[0][1].y + markerCorners[0][2].y + markerCorners[0][3].y) / 4.0;
             coord_msg.x = center_x;
             coord_msg.y = center_y;
+
+            // Calculate the difference in X and Y between Top-Right corner and Top-Left then calculate the angle in radians to know the ArUco orientation
+            dx = markerCorners[0][1].x - markerCorners[0][0].x;
+            dy = markerCorners[0][1].y - markerCorners[0][0].y;
+            marker_angle = atan2(dy, dx);
+            coord_msg.z = marker_angle;
+
             coord_pub_->publish(coord_msg);
 
             RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away (center at X=%.1f, Y=%.1f)", markerIds[i], distance, center_x, center_y);

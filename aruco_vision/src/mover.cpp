@@ -82,6 +82,7 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
 void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
     target_x = msg->x;
     target_y = msg->y;
+    target_angle = msg->z;
     time = this->now();
 }
 
@@ -131,14 +132,24 @@ void ArucoFollowerNode::ctrlLoop() {
         case ROBOT_FIX_Y:
             if (y_fixed) {
                 if (!x_fixed) rs = ROBOT_FIX_X;
-                else rs = ROBOT_PARK;
+                else rs = ROBOT_ALIGN;
             }
             break;
 
         case ROBOT_FIX_X:
             if (x_fixed) {
                 if (!y_fixed) rs = ROBOT_FIX_Y;
-                else rs = ROBOT_PARK;
+                else rs = ROBOT_ALIGN;
+            }
+            break;
+
+        case ROBOT_ALIGN:
+            if (!y_fixed) {
+                rs = ROBOT_FIX_Y;
+            } else if (!x_fixed) {
+                rs = ROBOT_FIX_X;
+            } else {
+                rs = ROBOT_PARK;
             }
             break;
 
@@ -151,10 +162,15 @@ void ArucoFollowerNode::ctrlLoop() {
                 rs = ROBOT_PARK;
             }
             break;
+
+        default:
+            break;
     }
 
     message.linear.x = 0.0;
     message.angular.z = 0.0;
+
+    float wanted_angle = 0.0, current_angle = 0.0, error_angle = 0.0;
 
     if( rs == ROBOT_FIX_Y ){
         if (target_y < Y_PARK) {
@@ -167,6 +183,16 @@ void ArucoFollowerNode::ctrlLoop() {
             message.angular.z = -0.2;   // Spin Right
         } else if (target_x > X_PARK) {
             message.angular.z = 0.2;    // Spin Left
+        }
+    } else if( rs == ROBOT_ALIGN ){
+        wanted_angle = 0.0; 
+        current_angle = target_angle; 
+        error_angle = wanted_angle - current_angle;
+        error_angle = atan2(sin(error_angle), cos(error_angle));
+        if (error_angle > 0.1) {
+            message.angular.z = 0.2;
+        } else if (error_angle < -0.1) {
+            message.angular.z = -0.2;
         }
     }
     
