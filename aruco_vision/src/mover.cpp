@@ -85,8 +85,10 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
     time = this->now();
 }
 
-#define X_PARK 320.0
-#define Y_PARK 240.0
+#define X_PARK 960.0
+#define Y_PARK 540.0
+#define UNCERTAINTY 20.0
+#define HYSTERESIS 60.0
 
 /* 
  * Function ctrlLoop
@@ -102,8 +104,12 @@ void ArucoFollowerNode::ctrlLoop() {
     bool aruco_visible = (now - time).seconds() < 1.0;
 
     // The robot is perfectly parked ONLY if both X and Y are in the center zone
-    bool y_fixed = (target_y >= Y_PARK-10.0 && target_y <= Y_PARK+10.0);
-    bool x_fixed = (target_x >= X_PARK-10.0 && target_x <= X_PARK+10.0);
+    bool y_fixed = (target_y >= Y_PARK-UNCERTAINTY && target_y <= Y_PARK+UNCERTAINTY);
+    bool x_fixed = (target_x >= X_PARK-UNCERTAINTY && target_x <= X_PARK+UNCERTAINTY);
+
+    // The robot moves again if it gets out of a larger zone to keep it from always moving
+    bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
+    bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
@@ -137,9 +143,9 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
 
         case ROBOT_PARK:
-            if (!y_fixed) {
+            if (!y_hyst) {
                 rs = ROBOT_FIX_Y;
-            } else if (!x_fixed) {
+            } else if (!x_hyst) {
                 rs = ROBOT_FIX_X;
             } else {
                 rs = ROBOT_PARK;
