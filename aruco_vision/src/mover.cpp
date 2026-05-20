@@ -107,10 +107,7 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
 #define DEADBAND_ANGLE  0.05
 
 // Sensor time out
-#define ARUCO_TIMEOUT   10
-
-// The distance of the "Ghost Marker" in pixels
-#define LOOKAHEAD_DIST 200.0
+#define ARUCO_TIMEOUT   1.0
 
 /* 
  * Function ctrlLoop
@@ -122,77 +119,104 @@ void ArucoFollowerNode::ctrlLoop() {
     auto message = geometry_msgs::msg::Twist();
     auto now = this->now();
 
-    // 1. Data Evaluation
+    // If 1 second passes with no new data, we lost the marker
     bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    // A. Calculate Y Error normally
-    float error_y = Y_PARK - target_y;
+    // // The robot is perfectly parked ONLY if both X and Y are in the center zone
+    // bool y_fixed = (target_y >= Y_PARK-UNCERTAINTY && target_y <= Y_PARK+UNCERTAINTY);
+    // bool x_fixed = (target_x >= X_PARK-UNCERTAINTY && target_x <= X_PARK+UNCERTAINTY);
 
-    // B. Calculate the Angle Error
-    float error_angle = 0.0 - target_angle;
+    // // The robot moves again if it gets out of a larger zone to keep it from always moving
+    // bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
+    // bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
+
+    // // The robot is aligned if the angle is close to 0.0 radians
+    // bool angle_fixed = (target_angle >= -ANGLE_PARK && target_angle <= ANGLE_PARK);
+    // bool angle_hyst = (target_angle >= -ANGLE_HYST && target_angle <= ANGLE_HYST);
+
+    float error_y = Y_PARK - target_y;
+    float error_x = X_PARK - target_x;
+    float error_angle = ANGLE_PARK - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
-    // C. --- PURE PURSUIT (VIRTUAL WAYPOINT) LOGIC ---
-    // Shrink the lookahead distance as we get closer so the ghost marker merges with the real one
-    float current_lookahead = LOOKAHEAD_DIST;
-    if (std::abs(error_y) < LOOKAHEAD_DIST) {
-        current_lookahead = std::abs(error_y);
-    }
-
-    // Project the virtual X coordinate using Trigonometry
-    // NOTE: Depending on your camera's coordinate frame, if the robot curves the wrong way, 
-    // change the '-' to a '+' in the line below.
-    float virtual_x = target_x - (current_lookahead * sin(target_angle));
-
-    // Calculate the X error used for STEERING (aiming at the ghost marker)
-    float steering_error_x = X_PARK - virtual_x;
-    
-    // Calculate the REAL X error used for PARKING (checking if we physically reached the true center)
-    float real_error_x = X_PARK - target_x;
-    // ------------------------------------------------
-    
-    // Evaluate pure physical position for state transitions (Using REAL X)
-    bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || 
-                          std::abs(real_error_x) > UNCERTAINTY || 
-                          std::abs(error_angle) > ANGLE_UNCE);
-                          
-    bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && 
-                          std::abs(real_error_x) < UNCERTAINTY && 
-                          std::abs(error_angle) < ANGLE_UNCE);
-                          
-    bool robot_drifted = (std::abs(error_y) > HYSTERESIS || 
-                          std::abs(real_error_x) > HYSTERESIS || 
-                          std::abs(error_angle) > ANGLE_HYST);
+    bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
+    bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
+    bool robot_drifted = (std::abs(error_y) > HYSTERESIS || std::abs(error_x) > HYSTERESIS || std::abs(error_angle) > ANGLE_HYST);
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
     }
 
-    // 2. State Machine
     switch (rs) {
         case ROBOT_IDLE:
-            if (aruco_visible) {
-                if (ready_to_move || robot_drifted) {
+            // if (aruco_visible) {
+            //     if (!y_fixed) {
+            //         rs = ROBOT_FIX_Y;
+            //     } else if (!x_fixed) {
+            //         rs = ROBOT_FIX_X;
+            //     } else {
+            //         rs = ROBOT_PARK_1;
+            //     }
+            // }
+            if( aruco_visible ){
+                if( ready_to_move || robot_drifted ){
                     rs = ROBOT_MOVE;
-                    RCLCPP_INFO(this->get_logger(), "Target acquired. Chasing virtual waypoint.");
-                } else if (ready_to_park) {
+                    RCLCPP_INFO(this->get_logger(), "Target acquired. Moving to align.");
+                }else if( ready_to_park ){
                     rs = ROBOT_PARK;
-                    RCLCPP_INFO(this->get_logger(), "Target acquired. Already perfectly aligned.");
+                    RCLCPP_INFO(this->get_logger(), "Target acquired. Parking.");
                 }
+                
             }
             break;
 
+        // case ROBOT_FIX_Y:
+        //     if (y_fixed) {
+        //         if (!x_fixed) rs = ROBOT_FIX_X;
+        //         else rs = ROBOT_PARK_1;
+        //     }
+        //     break;
+
+        // case ROBOT_FIX_X:
+        //     if (x_fixed) {
+        //         if (!y_fixed) rs = ROBOT_FIX_Y;
+        //         else rs = ROBOT_PARK_1;
+        //     }
+        //     break;
+
+        // case ROBOT_PARK_1:
+        //     if (!y_hyst) {
+        //         rs = ROBOT_FIX_Y;
+        //     } else if (!x_hyst) {
+        //         rs = ROBOT_FIX_X;
+        //     } else {
+        //         rs = ROBOT_ALIGN;
+        //     }
+        //     break;
+
+        // case ROBOT_ALIGN:
+        //     if (angle_fixed) {
+        //         rs = ROBOT_PARK_2;
+        //     }
+        //     break;
+
+        // case ROBOT_PARK_2:
+        //     if (!angle_hyst) {
+        //         rs = ROBOT_ALIGN;
+        //     }
+        //     break;
+
         case ROBOT_MOVE:
-            if (ready_to_park) {
+            if( ready_to_park ){
                 rs = ROBOT_PARK;
-                RCLCPP_INFO(this->get_logger(), "Alignment complete. Parking.");
+                RCLCPP_INFO(this->get_logger(), "Aligning complete. Parking.");
             }
             break;
 
         case ROBOT_PARK:
-            if (robot_drifted) {
+            if( robot_drifted ){
                 rs = ROBOT_MOVE;
-                RCLCPP_INFO(this->get_logger(), "Robot drifted. Waking up to adjust.");
+                RCLCPP_INFO(this->get_logger(), "Robot has drifted. Moving to align.");
             }
             break;
 
@@ -200,25 +224,57 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
     }
 
-    // 3. Motor Execution
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    if (rs == ROBOT_MOVE) {
-        // Drive forward based on Y distance
+    // float wanted_angle = 0.0, current_angle = 0.0, error_angle = 0.0;
+
+    // if( rs == ROBOT_FIX_Y ){
+    //     if (target_y < Y_PARK) {
+    //         message.linear.x = 0.1;     // Forward
+    //     } else if (target_y > Y_PARK) {
+    //         message.linear.x = -0.1;    // Backward
+    //     }
+    // } else if( rs == ROBOT_FIX_X ){
+    //     if (target_x < X_PARK) {
+    //         message.angular.z = -0.2;   // Spin Right
+    //     } else if (target_x > X_PARK) {
+    //         message.angular.z = 0.2;    // Spin Left
+    //     }
+    // } else if( rs == ROBOT_ALIGN ){
+    //     wanted_angle = 0.0; 
+    //     current_angle = target_angle; 
+    //     error_angle = wanted_angle - current_angle;
+    //     error_angle = atan2(sin(error_angle), cos(error_angle));
+    //     if (error_angle > 0.1) {
+    //         message.angular.z = 0.2;
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating LEFT", error_angle);
+    //     } else if (error_angle < -0.1) {
+    //         message.angular.z = -0.2;
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating RIGHT", error_angle);
+    //     } else {
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> ALIGNED!", error_angle);
+    //     }
+    // }
+
+    if( rs == ROBOT_MOVE ){
         message.linear.x = KP_Y * error_y;
+
+        if( std::abs(error_y) <= UNCERTAINTY ){
+            message.angular.z = (KP_ANGLE * error_angle);
+        }else{
+            message.angular.z = (KP_ANGLE * error_angle) + (KP_X * error_x);
+        }
         
-        // Steer based on the Angle and the VIRTUAL X coordinate
-        // (We keep the minus sign for KP_X because your camera is behind the wheels)
-        message.angular.z = (KP_ANGLE * error_angle) - (KP_X * steering_error_x);
+        if (message.linear.x > SPEED_LINEAR)
+            message.linear.x = SPEED_LINEAR;
+        if (message.linear.x < -SPEED_LINEAR)
+            message.linear.x = -SPEED_LINEAR;
+        if (message.angular.z > SPEED_ANGULAR)
+            message.angular.z = SPEED_ANGULAR;
+        if (message.angular.z < -SPEED_ANGULAR)
+            message.angular.z = -SPEED_ANGULAR;
 
-        // Hard safety limits
-        if (message.linear.x > SPEED_LINEAR) message.linear.x = SPEED_LINEAR;
-        if (message.linear.x < -SPEED_LINEAR) message.linear.x = -SPEED_LINEAR;
-        if (message.angular.z > SPEED_ANGULAR) message.angular.z = SPEED_ANGULAR;
-        if (message.angular.z < -SPEED_ANGULAR) message.angular.z = -SPEED_ANGULAR;
-
-        // Deadband logic to prevent low-speed motor whining and twitching
         if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
         if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
     }
