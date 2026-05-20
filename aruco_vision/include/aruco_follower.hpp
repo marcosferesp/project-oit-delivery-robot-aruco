@@ -15,11 +15,13 @@
 
 typedef enum {
     ROBOT_IDLE,
-    ROBOT_FIX_Y,
-    ROBOT_FIX_X,
-    ROBOT_PARK,
-    ROBOT_ALIGN,
-    ROBOT_PARK_ALIGNED
+    // ROBOT_FIX_Y,
+    // ROBOT_FIX_X,
+    // ROBOT_PARK_1,
+    // ROBOT_ALIGN,
+    // ROBOT_PARK_2,
+    ROBOT_MOVE,
+    ROBOT_PARK
 } robot_state_t;
 
 /* 

@@ -86,12 +86,28 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
     time = this->now();
 }
 
-#define X_PARK 960.0
-#define Y_PARK 540.0
+// Target values to park and uncertainties
+#define X_PARK      960.0
+#define Y_PARK      540.0
 #define UNCERTAINTY 20.0
-#define HYSTERESIS 60.0
-#define ANGLE_PARK 0.1
-#define ANGLE_HYST 0.2
+#define HYSTERESIS  60.0
+#define ANGLE_PARK  0.0
+#define ANGLE_UNCE  0.1
+#define ANGLE_HYST  0.2
+
+// Proportional gains
+#define KP_Y        0.00037
+#define KP_X        0.00021
+#define KP_ANGLE    0.063
+
+// Motor limits
+#define SPEED_LINEAR    0.2
+#define SPEED_ANGULAR   0.2
+#define DEADBAND_LINEAR 0.02
+#define DEADBAND_ANGLE  0.05
+
+// Sensor time out
+#define ARUCO_TIMEOUT   1.0
 
 /* 
  * Function ctrlLoop
@@ -104,19 +120,28 @@ void ArucoFollowerNode::ctrlLoop() {
     auto now = this->now();
 
     // If 1 second passes with no new data, we lost the marker
-    bool aruco_visible = (now - time).seconds() < 1.0;
+    bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    // The robot is perfectly parked ONLY if both X and Y are in the center zone
-    bool y_fixed = (target_y >= Y_PARK-UNCERTAINTY && target_y <= Y_PARK+UNCERTAINTY);
-    bool x_fixed = (target_x >= X_PARK-UNCERTAINTY && target_x <= X_PARK+UNCERTAINTY);
+    // // The robot is perfectly parked ONLY if both X and Y are in the center zone
+    // bool y_fixed = (target_y >= Y_PARK-UNCERTAINTY && target_y <= Y_PARK+UNCERTAINTY);
+    // bool x_fixed = (target_x >= X_PARK-UNCERTAINTY && target_x <= X_PARK+UNCERTAINTY);
 
-    // The robot moves again if it gets out of a larger zone to keep it from always moving
-    bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
-    bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
+    // // The robot moves again if it gets out of a larger zone to keep it from always moving
+    // bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
+    // bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
 
-    // The robot is aligned if the angle is close to 0.0 radians
-    bool angle_fixed = (target_angle >= -ANGLE_PARK && target_angle <= ANGLE_PARK);
-    bool angle_hyst = (target_angle >= -ANGLE_HYST && target_angle <= ANGLE_HYST);
+    // // The robot is aligned if the angle is close to 0.0 radians
+    // bool angle_fixed = (target_angle >= -ANGLE_PARK && target_angle <= ANGLE_PARK);
+    // bool angle_hyst = (target_angle >= -ANGLE_HYST && target_angle <= ANGLE_HYST);
+
+    float error_y = Y_PARK - target_y;
+    float error_x = X_PARK - target_x;
+    float error_angle = ANGLE_PARK - target_angle;
+    error_angle = atan2(sin(error_angle), cos(error_angle));
+    
+    bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
+    bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
+    bool robot_drifted = (std::abs(error_y) > HYSTERESIS || std::abs(error_x) > HYSTERESIS || std::abs(error_angle) > ANGLE_HYST);
 
     if (!aruco_visible) {
         rs = ROBOT_IDLE;
@@ -124,50 +149,74 @@ void ArucoFollowerNode::ctrlLoop() {
 
     switch (rs) {
         case ROBOT_IDLE:
-            if (aruco_visible) {
-                if (!y_fixed) {
-                    rs = ROBOT_FIX_Y;
-                } else if (!x_fixed) {
-                    rs = ROBOT_FIX_X;
-                } else {
+            // if (aruco_visible) {
+            //     if (!y_fixed) {
+            //         rs = ROBOT_FIX_Y;
+            //     } else if (!x_fixed) {
+            //         rs = ROBOT_FIX_X;
+            //     } else {
+            //         rs = ROBOT_PARK_1;
+            //     }
+            // }
+            if( aruco_visible ){
+                if( ready_to_move || robot_drifted ){
+                    rs = ROBOT_MOVE;
+                    RCLCPP_INFO(this->get_logger(), "Target acquired. Moving to align.");
+                }else if( ready_to_park ){
                     rs = ROBOT_PARK;
+                    RCLCPP_INFO(this->get_logger(), "Target acquired. Parking.");
                 }
+                
             }
             break;
 
-        case ROBOT_FIX_Y:
-            if (y_fixed) {
-                if (!x_fixed) rs = ROBOT_FIX_X;
-                else rs = ROBOT_PARK;
-            }
-            break;
+        // case ROBOT_FIX_Y:
+        //     if (y_fixed) {
+        //         if (!x_fixed) rs = ROBOT_FIX_X;
+        //         else rs = ROBOT_PARK_1;
+        //     }
+        //     break;
 
-        case ROBOT_FIX_X:
-            if (x_fixed) {
-                if (!y_fixed) rs = ROBOT_FIX_Y;
-                else rs = ROBOT_PARK;
+        // case ROBOT_FIX_X:
+        //     if (x_fixed) {
+        //         if (!y_fixed) rs = ROBOT_FIX_Y;
+        //         else rs = ROBOT_PARK_1;
+        //     }
+        //     break;
+
+        // case ROBOT_PARK_1:
+        //     if (!y_hyst) {
+        //         rs = ROBOT_FIX_Y;
+        //     } else if (!x_hyst) {
+        //         rs = ROBOT_FIX_X;
+        //     } else {
+        //         rs = ROBOT_ALIGN;
+        //     }
+        //     break;
+
+        // case ROBOT_ALIGN:
+        //     if (angle_fixed) {
+        //         rs = ROBOT_PARK_2;
+        //     }
+        //     break;
+
+        // case ROBOT_PARK_2:
+        //     if (!angle_hyst) {
+        //         rs = ROBOT_ALIGN;
+        //     }
+        //     break;
+
+        case ROBOT_MOVE:
+            if( ready_to_park ){
+                rs = ROBOT_PARK;
+                RCLCPP_INFO(this->get_logger(), "Aligning complete. Parking.");
             }
             break;
 
         case ROBOT_PARK:
-            if (!y_hyst) {
-                rs = ROBOT_FIX_Y;
-            } else if (!x_hyst) {
-                rs = ROBOT_FIX_X;
-            } else {
-                rs = ROBOT_ALIGN;
-            }
-            break;
-
-        case ROBOT_ALIGN:
-            if (angle_fixed) {
-                rs = ROBOT_PARK_ALIGNED;
-            }
-            break;
-
-        case ROBOT_PARK_ALIGNED:
-            if (!angle_hyst) {
-                rs = ROBOT_ALIGN;
+            if( robot_drifted ){
+                rs = ROBOT_MOVE;
+                RCLCPP_INFO(this->get_logger(), "Robot has drifted. Moving to align.");
             }
             break;
 
@@ -178,34 +227,48 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    float wanted_angle = 0.0, current_angle = 0.0, error_angle = 0.0;
+    // float wanted_angle = 0.0, current_angle = 0.0, error_angle = 0.0;
 
-    if( rs == ROBOT_FIX_Y ){
-        if (target_y < Y_PARK) {
-            message.linear.x = 0.1;     // Forward
-        } else if (target_y > Y_PARK) {
-            message.linear.x = -0.1;    // Backward
-        }
-    } else if( rs == ROBOT_FIX_X ){
-        if (target_x < X_PARK) {
-            message.angular.z = -0.2;   // Spin Right
-        } else if (target_x > X_PARK) {
-            message.angular.z = 0.2;    // Spin Left
-        }
-    } else if( rs == ROBOT_ALIGN ){
-        wanted_angle = 0.0; 
-        current_angle = target_angle; 
-        error_angle = wanted_angle - current_angle;
-        error_angle = atan2(sin(error_angle), cos(error_angle));
-        if (error_angle > 0.1) {
-            message.angular.z = 0.2;
-            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating LEFT", error_angle);
-        } else if (error_angle < -0.1) {
-            message.angular.z = -0.2;
-            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating RIGHT", error_angle);
-        } else {
-            RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> ALIGNED!", error_angle);
-        }
+    // if( rs == ROBOT_FIX_Y ){
+    //     if (target_y < Y_PARK) {
+    //         message.linear.x = 0.1;     // Forward
+    //     } else if (target_y > Y_PARK) {
+    //         message.linear.x = -0.1;    // Backward
+    //     }
+    // } else if( rs == ROBOT_FIX_X ){
+    //     if (target_x < X_PARK) {
+    //         message.angular.z = -0.2;   // Spin Right
+    //     } else if (target_x > X_PARK) {
+    //         message.angular.z = 0.2;    // Spin Left
+    //     }
+    // } else if( rs == ROBOT_ALIGN ){
+    //     wanted_angle = 0.0; 
+    //     current_angle = target_angle; 
+    //     error_angle = wanted_angle - current_angle;
+    //     error_angle = atan2(sin(error_angle), cos(error_angle));
+    //     if (error_angle > 0.1) {
+    //         message.angular.z = 0.2;
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating LEFT", error_angle);
+    //     } else if (error_angle < -0.1) {
+    //         message.angular.z = -0.2;
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating RIGHT", error_angle);
+    //     } else {
+    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> ALIGNED!", error_angle);
+    //     }
+    // }
+
+    if( rs == ROBOT_MOVE ){
+        message.linear.x = KP_Y * error_y;
+        message.angular.z = (KP_ANGLE * error_angle) + (KP_X * error_x);
+
+        if (message.linear.x > SPEED_LINEAR)
+            message.linear.x = SPEED_LINEAR;
+        if (message.linear.x < -SPEED_LINEAR)
+            message.linear.x = -SPEED_LINEAR;
+        if (message.angular.z > SPEED_ANGULAR)
+            message.angular.z = SPEED_ANGULAR;
+        if (message.angular.z < -SPEED_ANGULAR)
+            message.angular.z = -SPEED_ANGULAR;
     }
     
     cmd_pub_->publish(message);

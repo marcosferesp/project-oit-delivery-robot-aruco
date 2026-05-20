@@ -23,7 +23,7 @@ def generate_launch_description():
             name='camera_node',
             parameters=[{
                 'image_size': [1920, 1080],
-                'video_device':'/dev/video2',
+                'video_device':'/dev/video1',
                 'camera_frame_id': 'camera_link_optical',
                 'camera_info_url': f'file://{config_dir}'
             }]
@@ -33,7 +33,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='camera_tf_publisher',
             arguments=[
-                '0.0', '0.0', '0.50',       # Distance according to wheels in (x,y,z)
+                '-0.05', '0.0', '0.60',     # Distance according to wheels in (x,y,z) in cm
                 '0.0', '-1.5708', '0.0',    # -90 degrees because the camera is now facing upstairs
                 'base_link',
                 'camera_link_optical'
