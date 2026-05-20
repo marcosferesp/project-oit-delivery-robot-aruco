@@ -92,8 +92,8 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
 #define UNCERTAINTY 20.0
 #define HYSTERESIS  60.0
 #define ANGLE_PARK  0.0
-#define ANGLE_UNCE  0.1
-#define ANGLE_HYST  0.2
+#define ANGLE_UNCE  0.2
+#define ANGLE_HYST  0.3
 
 // Proportional gains
 #define KP_Y        0.00037
@@ -138,7 +138,7 @@ void ArucoFollowerNode::ctrlLoop() {
     float error_x = X_PARK - target_x;
     float error_angle = ANGLE_PARK - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
-    
+
     bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
     bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
     bool robot_drifted = (std::abs(error_y) > HYSTERESIS || std::abs(error_x) > HYSTERESIS || std::abs(error_angle) > ANGLE_HYST);
@@ -269,6 +269,9 @@ void ArucoFollowerNode::ctrlLoop() {
             message.angular.z = SPEED_ANGULAR;
         if (message.angular.z < -SPEED_ANGULAR)
             message.angular.z = -SPEED_ANGULAR;
+
+        if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
+        if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
     }
     
     cmd_pub_->publish(message);
