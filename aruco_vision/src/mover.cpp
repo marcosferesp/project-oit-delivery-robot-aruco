@@ -139,6 +139,12 @@ void ArucoFollowerNode::ctrlLoop() {
     float error_angle = ANGLE_PARK - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
+    if (error_angle > 1.5708) {         // Pi/2 (90 degrees)
+        error_angle -= 3.14159;         // Subtract 180 degrees (Pi)
+    } else if (error_angle < -1.5708) {
+        error_angle += 3.14159;         // Add 180 degrees (Pi)
+    }
+
     bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
     bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
     bool robot_drifted = (std::abs(error_y) > HYSTERESIS || std::abs(error_x) > HYSTERESIS || std::abs(error_angle) > ANGLE_HYST);
@@ -257,12 +263,16 @@ void ArucoFollowerNode::ctrlLoop() {
     //     }
     // }
 
+    float rawa = 0.0;
+
     if( rs == ROBOT_MOVE ){
         message.linear.x = KP_Y * error_y;
 
         if( std::abs(error_y) <= UNCERTAINTY ){
+            rawa = (KP_ANGLE * error_angle);
             message.angular.z = (KP_ANGLE * error_angle);
         }else{
+            rawa = (KP_ANGLE * error_angle) + (KP_X * error_x);
             message.angular.z = (KP_ANGLE * error_angle) + (KP_X * error_x);
         }
         
@@ -277,6 +287,8 @@ void ArucoFollowerNode::ctrlLoop() {
 
         if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
         if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
+
+        RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, rawa, message.angular.z);
     }
     
     cmd_pub_->publish(message);
