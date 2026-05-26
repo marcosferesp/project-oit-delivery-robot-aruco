@@ -109,7 +109,7 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
             coord_pub_->publish(coord_msg);
 
              // Send the ID of the primary marker detected
-            id_msg.data = markerIds[0];
+            id_msg.data = markerIds[i];
             id_pub_->publish(id_msg);
 
             RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away (center at X=%.1f, Y=%.1f)", markerIds[i], distance, center_x, center_y);

@@ -60,9 +60,9 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
     time = this->now();
 
     // Init Robot Route Database
-    route[0] = {0, false, 2.0, 15.0}; // ID 0: Pass through, max 15s search
-    route[1] = {1, false, 1.5, 15.0}; // ID 1: Pass through, max 15s search
-    route[2] = {2, true,  0.0, 0.0};  // ID 2: Destination. Park here.
+    route[5] = {5, false, 2.0, 15.0}; // ID 0: Pass through, max 15s search
+    route[3] = {3, false, 2.0, 15.0}; // ID 1: Pass through, max 15s search
+    route[4] = {4, true,  0.0, 0.0};  // ID 2: Destination. Park here.
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
@@ -203,7 +203,7 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    float debug_rawa = 0.0;
+    // float debug_rawa = 0.0;
 
     switch (rs) {
         case ROBOT_MOVE:
@@ -212,10 +212,10 @@ void ArucoFollowerNode::ctrlLoop() {
                 message.linear.x = KP_Y * error_y;
 
                 if( std::abs(error_y) <= UNCERTAINTY ){
-                    debug_rawa = -(KP_ANGLE * error_angle);
+                    // debug_rawa = -(KP_ANGLE * error_angle);
                     message.angular.z = -(KP_ANGLE * error_angle);
                 }else{
-                    debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                    // debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
                     message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
                 }
             } else {
@@ -235,7 +235,10 @@ void ArucoFollowerNode::ctrlLoop() {
             if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
             if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
 
-            RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, debug_rawa, message.angular.z);
+            const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH"};
+            RCLCPP_INFO(this->get_logger(), 
+                "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
+                state_str[rs], target_id, rr.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
 
             break;
         }
