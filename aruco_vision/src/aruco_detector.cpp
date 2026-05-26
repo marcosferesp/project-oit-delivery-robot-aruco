@@ -24,6 +24,7 @@ ArucoDetectorNode::ArucoDetectorNode() : Node("aruco_detector_node"), got_camera
     // Distance Publisher
     // dist_pub_ = this->create_publisher<std_msgs::msg::Float32>("/aruco_distance", 10);
     coord_pub_ = this->create_publisher<geometry_msgs::msg::Point>("/aruco_coordinates", 10);
+    id_pub_ = this->create_publisher<std_msgs::msg::Int32>("/aruco_id", 10);
 
     RCLCPP_INFO(this->get_logger(), "ArUco Brain is online and waiting for video...");
 }
@@ -83,6 +84,7 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
     double distance = 0.0;
     float center_x = 0.0, center_y = 0.0, dx = 0.0, dy = 0.0, marker_angle = 0.0;
     geometry_msgs::msg::Point coord_msg;
+    std_msgs::msg::Int32 id_msg;
 
     if (markerIds.size() > 0) {
         std::vector<cv::Vec3d> rvecs, tvecs;
@@ -105,6 +107,10 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
             coord_msg.z = marker_angle;
 
             coord_pub_->publish(coord_msg);
+
+             // Send the ID of the primary marker detected
+            id_msg.data = markerIds[0];
+            id_pub_->publish(id_msg);
 
             RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away (center at X=%.1f, Y=%.1f)", markerIds[i], distance, center_x, center_y);
         }

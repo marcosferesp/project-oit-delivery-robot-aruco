@@ -15,6 +15,7 @@
 #include "opencv2/opencv.hpp"
 #include "opencv2/aruco.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include "geometry_msgs/msg/point.hpp"
 
 
@@ -34,6 +35,7 @@ private:
     // Publishers
     // rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr dist_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr coord_pub_;
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr id_pub_;
 
     // Subscriptions
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr info_sub_;    // Subscribes to the camera's lens calibration data

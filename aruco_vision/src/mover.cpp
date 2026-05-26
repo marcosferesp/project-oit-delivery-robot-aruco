@@ -59,6 +59,11 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
 
     time = this->now();
 
+    // Init Robot Route Database
+    route[0] = {0, false, 2.0, 15.0}; // ID 0: Pass through, max 15s search
+    route[1] = {1, false, 1.5, 15.0}; // ID 1: Pass through, max 15s search
+    route[2] = {2, true,  0.0, 0.0};  // ID 2: Destination. Park here.
+
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
 
@@ -76,7 +81,7 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
 /* 
  * Function coordCallback
  * Triggers whenever new x and y coordinates are published by the camera
- * Inputs : msg (std_msgs::msg::Float32::SharedPtr) : the distance data
+ * Inputs : msg (geometry_msgs::msg::Point::SharedPtr) : the coordinates data
  * Output :
  */
 void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
@@ -84,6 +89,16 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
     target_y = msg->y;
     target_angle = msg->z;
     time = this->now();
+}
+
+/* 
+ * Function coordCallback
+ * Triggers whenever new x and y coordinates are published by the camera
+ * Inputs : msg (std_msgs::msg::Int32::SharedPtr) : the ArUco ID data
+ * Output :
+ */
+void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
+    target_id = msg->data;
 }
 
 // Target values to park and uncertainties
@@ -127,13 +142,11 @@ void ArucoFollowerNode::ctrlLoop() {
     float error_angle = ANGLE_PARK - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
-    bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
-    bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
-    bool robot_drifted = (std::abs(error_y) > HYSTERESIS || std::abs(error_x) > HYSTERESIS || std::abs(error_angle) > ANGLE_HYST);
+    robot_route_t rr = route[target_id];
 
-    if (!aruco_visible) {
-        rs = ROBOT_IDLE;
-    }
+    bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
+    bool ready_to_park = (rr.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
+    bool robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_x) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
 
     switch (rs) {
         case ROBOT_IDLE:
@@ -150,16 +163,36 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
 
         case ROBOT_MOVE:
-            if( ready_to_park ){
+            if (!aruco_visible) {
+                if (!rr.is_destination) {
+                    rs = ROBOT_SEARCH;
+                    search_start_time = now;
+                    RCLCPP_INFO(this->get_logger(), "Marker passed. Entering SEARCH mode.");
+                } else {
+                    rs = ROBOT_IDLE;
+                }
+            } else if( ready_to_park ){
                 rs = ROBOT_PARK;
                 RCLCPP_INFO(this->get_logger(), "Aligning complete. Parking.");
             }
             break;
 
         case ROBOT_PARK:
-            if( robot_drifted ){
+            if (!aruco_visible) {
+                rs = ROBOT_IDLE;
+            } else if( robot_drifted ){
                 rs = ROBOT_MOVE;
                 RCLCPP_INFO(this->get_logger(), "Robot has drifted. Moving to align.");
+            }
+            break;
+
+        case ROBOT_SEARCH:
+            if (aruco_visible) {
+                rs = ROBOT_MOVE;
+                RCLCPP_INFO(this->get_logger(), "Target ID %d acquired from search. Moving.", target_id);
+            } else if ((now - search_start_time).seconds() > rr.search_timeout) {
+                rs = ROBOT_IDLE;
+                RCLCPP_INFO(this->get_logger(), "Search timeout! Target lost. Idling.");
             }
             break;
 
@@ -172,30 +205,52 @@ void ArucoFollowerNode::ctrlLoop() {
 
     float debug_rawa = 0.0;
 
-    if( rs == ROBOT_MOVE ){
-        message.linear.x = KP_Y * error_y;
+    switch (rs) {
+        case ROBOT_MOVE:
+        {
+            if (rr.is_destination) {
+                message.linear.x = KP_Y * error_y;
 
-        if( std::abs(error_y) <= UNCERTAINTY ){
-            debug_rawa = -(KP_ANGLE * error_angle);
-            message.angular.z = -(KP_ANGLE * error_angle);
-        }else{
-            debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
-            message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                if( std::abs(error_y) <= UNCERTAINTY ){
+                    debug_rawa = -(KP_ANGLE * error_angle);
+                    message.angular.z = -(KP_ANGLE * error_angle);
+                }else{
+                    debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                    message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                }
+            } else {
+                message.linear.x = SPEED_LINEAR;
+                message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+            }
+            
+            if (message.linear.x > SPEED_LINEAR)
+                message.linear.x = SPEED_LINEAR;
+            if (message.linear.x < -SPEED_LINEAR)
+                message.linear.x = -SPEED_LINEAR;
+            if (message.angular.z > SPEED_ANGULAR)
+                message.angular.z = SPEED_ANGULAR;
+            if (message.angular.z < -SPEED_ANGULAR)
+                message.angular.z = -SPEED_ANGULAR;
+
+            if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
+            if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
+
+            RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, debug_rawa, message.angular.z);
+
+            break;
         }
-        
-        if (message.linear.x > SPEED_LINEAR)
+
+        case ROBOT_SEARCH:
+        {
             message.linear.x = SPEED_LINEAR;
-        if (message.linear.x < -SPEED_LINEAR)
-            message.linear.x = -SPEED_LINEAR;
-        if (message.angular.z > SPEED_ANGULAR)
-            message.angular.z = SPEED_ANGULAR;
-        if (message.angular.z < -SPEED_ANGULAR)
-            message.angular.z = -SPEED_ANGULAR;
+            message.angular.z = 0.0;
 
-        if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
-        if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
+            break;
+        }
 
-        RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, debug_rawa, message.angular.z);
+        default:
+            break;
+            
     }
     
     cmd_pub_->publish(message);
