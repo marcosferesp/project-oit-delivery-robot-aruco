@@ -103,8 +103,8 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
 // Motor limits
 #define SPEED_LINEAR    0.2
 #define SPEED_ANGULAR   0.2
-#define DEADBAND_LINEAR 0.02
-#define DEADBAND_ANGLE  0.05
+#define DEADBAND_LINEAR 0.01
+#define DEADBAND_ANGLE  0.01
 
 // Sensor time out
 #define ARUCO_TIMEOUT   1.0
@@ -122,28 +122,10 @@ void ArucoFollowerNode::ctrlLoop() {
     // If 1 second passes with no new data, we lost the marker
     bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    // // The robot is perfectly parked ONLY if both X and Y are in the center zone
-    // bool y_fixed = (target_y >= Y_PARK-UNCERTAINTY && target_y <= Y_PARK+UNCERTAINTY);
-    // bool x_fixed = (target_x >= X_PARK-UNCERTAINTY && target_x <= X_PARK+UNCERTAINTY);
-
-    // // The robot moves again if it gets out of a larger zone to keep it from always moving
-    // bool y_hyst = (target_y >= Y_PARK-HYSTERESIS && target_y <= Y_PARK+HYSTERESIS);
-    // bool x_hyst = (target_x >= X_PARK-HYSTERESIS && target_x <= X_PARK+HYSTERESIS);
-
-    // // The robot is aligned if the angle is close to 0.0 radians
-    // bool angle_fixed = (target_angle >= -ANGLE_PARK && target_angle <= ANGLE_PARK);
-    // bool angle_hyst = (target_angle >= -ANGLE_HYST && target_angle <= ANGLE_HYST);
-
     float error_y = Y_PARK - target_y;
     float error_x = X_PARK - target_x;
     float error_angle = ANGLE_PARK - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
-
-    if (error_angle > 1.5708) {         // Pi/2 (90 degrees)
-        error_angle -= 3.14159;         // Subtract 180 degrees (Pi)
-    } else if (error_angle < -1.5708) {
-        error_angle += 3.14159;         // Add 180 degrees (Pi)
-    }
 
     bool ready_to_move = (std::abs(error_y) > UNCERTAINTY || std::abs(error_x) > UNCERTAINTY || std::abs(error_angle) > ANGLE_UNCE);
     bool ready_to_park = (std::abs(error_y) < UNCERTAINTY && std::abs(error_x) < UNCERTAINTY && std::abs(error_angle) < ANGLE_UNCE);
@@ -155,15 +137,6 @@ void ArucoFollowerNode::ctrlLoop() {
 
     switch (rs) {
         case ROBOT_IDLE:
-            // if (aruco_visible) {
-            //     if (!y_fixed) {
-            //         rs = ROBOT_FIX_Y;
-            //     } else if (!x_fixed) {
-            //         rs = ROBOT_FIX_X;
-            //     } else {
-            //         rs = ROBOT_PARK_1;
-            //     }
-            // }
             if( aruco_visible ){
                 if( ready_to_move || robot_drifted ){
                     rs = ROBOT_MOVE;
@@ -175,42 +148,6 @@ void ArucoFollowerNode::ctrlLoop() {
                 
             }
             break;
-
-        // case ROBOT_FIX_Y:
-        //     if (y_fixed) {
-        //         if (!x_fixed) rs = ROBOT_FIX_X;
-        //         else rs = ROBOT_PARK_1;
-        //     }
-        //     break;
-
-        // case ROBOT_FIX_X:
-        //     if (x_fixed) {
-        //         if (!y_fixed) rs = ROBOT_FIX_Y;
-        //         else rs = ROBOT_PARK_1;
-        //     }
-        //     break;
-
-        // case ROBOT_PARK_1:
-        //     if (!y_hyst) {
-        //         rs = ROBOT_FIX_Y;
-        //     } else if (!x_hyst) {
-        //         rs = ROBOT_FIX_X;
-        //     } else {
-        //         rs = ROBOT_ALIGN;
-        //     }
-        //     break;
-
-        // case ROBOT_ALIGN:
-        //     if (angle_fixed) {
-        //         rs = ROBOT_PARK_2;
-        //     }
-        //     break;
-
-        // case ROBOT_PARK_2:
-        //     if (!angle_hyst) {
-        //         rs = ROBOT_ALIGN;
-        //     }
-        //     break;
 
         case ROBOT_MOVE:
             if( ready_to_park ){
@@ -233,47 +170,17 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    // float wanted_angle = 0.0, current_angle = 0.0, error_angle = 0.0;
-
-    // if( rs == ROBOT_FIX_Y ){
-    //     if (target_y < Y_PARK) {
-    //         message.linear.x = 0.1;     // Forward
-    //     } else if (target_y > Y_PARK) {
-    //         message.linear.x = -0.1;    // Backward
-    //     }
-    // } else if( rs == ROBOT_FIX_X ){
-    //     if (target_x < X_PARK) {
-    //         message.angular.z = -0.2;   // Spin Right
-    //     } else if (target_x > X_PARK) {
-    //         message.angular.z = 0.2;    // Spin Left
-    //     }
-    // } else if( rs == ROBOT_ALIGN ){
-    //     wanted_angle = 0.0; 
-    //     current_angle = target_angle; 
-    //     error_angle = wanted_angle - current_angle;
-    //     error_angle = atan2(sin(error_angle), cos(error_angle));
-    //     if (error_angle > 0.1) {
-    //         message.angular.z = 0.2;
-    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating LEFT", error_angle);
-    //     } else if (error_angle < -0.1) {
-    //         message.angular.z = -0.2;
-    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> Orientating RIGHT", error_angle);
-    //     } else {
-    //         RCLCPP_INFO(this->get_logger(), "ALIGNING: Error = %.3f rad -> ALIGNED!", error_angle);
-    //     }
-    // }
-
-    float rawa = 0.0;
+    float debug_rawa = 0.0;
 
     if( rs == ROBOT_MOVE ){
         message.linear.x = KP_Y * error_y;
 
         if( std::abs(error_y) <= UNCERTAINTY ){
-            rawa = (KP_ANGLE * error_angle);
-            message.angular.z = (KP_ANGLE * error_angle);
+            debug_rawa = -(KP_ANGLE * error_angle);
+            message.angular.z = -(KP_ANGLE * error_angle);
         }else{
-            rawa = (KP_ANGLE * error_angle) + (KP_X * error_x);
-            message.angular.z = (KP_ANGLE * error_angle) + (KP_X * error_x);
+            debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+            message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
         }
         
         if (message.linear.x > SPEED_LINEAR)
@@ -288,7 +195,7 @@ void ArucoFollowerNode::ctrlLoop() {
         if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
         if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
 
-        RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, rawa, message.angular.z);
+        RCLCPP_INFO(this->get_logger(), "ErrY: %5.1f | ErrX: %5.1f | ErrAng: %6.3f || RawAngZ: %6.3f | OutAngZ: %6.3f", error_y, error_x, error_angle, debug_rawa, message.angular.z);
     }
     
     cmd_pub_->publish(message);
