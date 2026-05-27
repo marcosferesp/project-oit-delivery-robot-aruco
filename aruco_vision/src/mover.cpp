@@ -103,18 +103,19 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
 }
 
 // Target values to park and uncertainties
-#define X_PARK      960.0
-#define Y_PARK      540.0
-#define UNCERTAINTY 30.0
-#define HYSTERESIS  80.0
-#define ANGLE_PARK  0.0
-#define ANGLE_UNCE  0.2
-#define ANGLE_HYST  0.35
+#define X_PARK          960.0
+#define Y_PARK          540.0
+#define UNCERTAINTY     30.0
+#define HYSTERESIS      80.0
+#define ANGLE_PARK      0.0
+#define ANGLE_UNCE      0.2
+#define ANGLE_HYST      0.35
 
 // Proportional gains
-#define KP_Y        0.00037
-#define KP_X        0.00021
-#define KP_ANGLE    0.127
+#define KP_Y            0.00037
+#define KP_X            0.00021
+#define KP_ERR_ANGLE    0.127
+#define KP_DYN_ANGLE    0.004
 
 // Motor limits
 #define SPEED_LINEAR    0.2
@@ -141,10 +142,12 @@ void ArucoFollowerNode::ctrlLoop() {
     float error_y = Y_PARK - target_y;
     float error_x = X_PARK - target_x;
 
-    float KP_TEST = 0.002;
-    float dynang = ANGLE_PARK+atan(KP_TEST*error_x);
-    // float error_angle = ANGLE_PARK - target_angle;
-    float error_angle = dynang - target_angle;
+    float raw_angle = ANGLE_PARK - target_angle;
+    raw_angle = atan2(sin(raw_angle), cos(raw_angle));
+
+    float dyn_angle = ANGLE_PARK + atan(KP_DYN_ANGLE*error_x);
+
+    float error_angle = dyn_angle - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
     robot_route_t rr = route[target_id];
@@ -213,7 +216,7 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    // float debug_rawa = 0.0;
+    float angle_brake = 0.0, x_brake = 0.0;
 
     switch (rs) {
         case ROBOT_MOVE:
@@ -222,20 +225,22 @@ void ArucoFollowerNode::ctrlLoop() {
                 message.linear.x = KP_Y * error_y;
 
                 if( std::abs(error_y) <= UNCERTAINTY ){
-                    // debug_rawa = -(KP_ANGLE * error_angle);
                     float test_angle = ANGLE_PARK - target_angle;
                     test_angle = atan2(sin(test_angle), cos(test_angle));
-                    // message.angular.z = -(KP_ANGLE * error_angle);
-                    message.angular.z = -(KP_ANGLE * test_angle);
+                    message.angular.z = -(KP_ERR_ANGLE * test_angle);
                 }else{
-                    // debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
-                    // message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
-                    message.angular.z = -(KP_ANGLE * error_angle);
+                    message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
             } else {
-                message.linear.x = SPEED_LINEAR * std::max(0.0f, std::cos(error_angle));
-                // message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
-                message.angular.z = -(KP_ANGLE * error_angle);
+                message.angular.z = -(KP_ERR_ANGLE * error_angle);
+
+                // Uses the raw angle so it only drives fast when pointing perfectly straight
+                angle_brake = std::pow(std::cos(raw_angle), 5.0);
+
+                // Slows down the forward speed by up to 70% if the robot is far off-center
+                x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
+                
+                message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
             }
             
             if (message.linear.x > SPEED_LINEAR)
