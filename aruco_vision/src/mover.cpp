@@ -55,6 +55,7 @@ void MoverNode::moveCallback() {
 ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_IDLE) {
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     coord_sub_ = this->create_subscription<geometry_msgs::msg::Point>("/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::coordCallback, this, std::placeholders::_1));
+    id_sub_ = this->create_subscription<std_msgs::msg::Int32>("/aruco_id", 10, std::bind(&ArucoFollowerNode::idCallback, this, std::placeholders::_1));
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
 
     time = this->now();
@@ -113,11 +114,11 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
 // Proportional gains
 #define KP_Y        0.00037
 #define KP_X        0.00021
-#define KP_ANGLE    0.063
+#define KP_ANGLE    0.127
 
 // Motor limits
 #define SPEED_LINEAR    0.2
-#define SPEED_ANGULAR   0.2
+#define SPEED_ANGULAR   0.4
 #define DEADBAND_LINEAR 0.01
 #define DEADBAND_ANGLE  0.01
 
@@ -139,10 +140,19 @@ void ArucoFollowerNode::ctrlLoop() {
 
     float error_y = Y_PARK - target_y;
     float error_x = X_PARK - target_x;
-    float error_angle = ANGLE_PARK - target_angle;
+
+    float KP_TEST = 0.002;
+    float dynang = ANGLE_PARK+atan(KP_TEST*error_x);
+    // float error_angle = ANGLE_PARK - target_angle;
+    float error_angle = dynang - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
     robot_route_t rr = route[target_id];
+    if( route.count(target_id) > 0 ){
+        rr = route[target_id];
+    } else {
+        rr = { (uint8_t)target_id, false, 0.0, 5.0 };
+    }
 
     bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
     bool ready_to_park = (rr.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
@@ -213,14 +223,19 @@ void ArucoFollowerNode::ctrlLoop() {
 
                 if( std::abs(error_y) <= UNCERTAINTY ){
                     // debug_rawa = -(KP_ANGLE * error_angle);
-                    message.angular.z = -(KP_ANGLE * error_angle);
+                    float test_angle = ANGLE_PARK - target_angle;
+                    test_angle = atan2(sin(test_angle), cos(test_angle));
+                    // message.angular.z = -(KP_ANGLE * error_angle);
+                    message.angular.z = -(KP_ANGLE * test_angle);
                 }else{
                     // debug_rawa = -((KP_ANGLE * error_angle) + (KP_X * error_x));
-                    message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                    // message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                    message.angular.z = -(KP_ANGLE * error_angle);
                 }
             } else {
-                message.linear.x = SPEED_LINEAR;
-                message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                message.linear.x = SPEED_LINEAR * std::max(0.0f, std::cos(error_angle));
+                // message.angular.z = -((KP_ANGLE * error_angle) + (KP_X * error_x));
+                message.angular.z = -(KP_ANGLE * error_angle);
             }
             
             if (message.linear.x > SPEED_LINEAR)
