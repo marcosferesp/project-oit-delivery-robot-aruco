@@ -22,10 +22,11 @@ typedef enum {
 } robot_state_t;
 
 typedef struct {
-    uint8_t aruco_id;
-    bool is_destination;
-    float dist_to_next;
-    float search_timeout;
+    int16_t aruco_id;
+    bool    is_destination;
+    float   dist_to_next;
+    float   search_timeout;
+    int16_t next_id;        // -1 means there is no next marker.
 } robot_route_t;
 
 /* 

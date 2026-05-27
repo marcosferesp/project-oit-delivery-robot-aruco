@@ -60,10 +60,10 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
 
     time = this->now();
 
-    // Init Robot Route Database
-    route[5] = {5, false, 2.0, 15.0}; // ID 0: Pass through, max 15s search
-    route[3] = {3, false, 2.0, 15.0}; // ID 1: Pass through, max 15s search
-    route[4] = {4, true,  0.0, 0.0};  // ID 2: Destination. Park here.
+    // Init robot route database
+    route[5] = {5, false, 2.0, 15.0,  3}; 
+    route[3] = {3, false, 2.0, 15.0,  4}; 
+    route[4] = {4, true,  0.0, 0.0,  -1};
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
@@ -99,7 +99,28 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
  * Output :
  */
 void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
-    target_id = msg->data;
+    int incoming_id = msg->data;
+
+    if (route.count(incoming_id) == 0) {
+        return; 
+    }
+
+    if (rs == ROBOT_SEARCH) {
+        // If we are driving blind, ONLY lock onto the specific next ID we expect
+        if (incoming_id == route[target_id].next_id) {
+            target_id = incoming_id;
+        }
+    } 
+    else if (rs == ROBOT_IDLE) {
+        // If the robot just booted up, latch onto any valid ID to start the run
+        target_id = incoming_id;
+    } 
+    else {
+        // If we are actively moving or parking under a marker, ignore any other valid markers that flash on screen
+        if (incoming_id == target_id) {
+            target_id = incoming_id;
+        }
+    }
 }
 
 // Target values to park and uncertainties
@@ -143,7 +164,7 @@ void ArucoFollowerNode::ctrlLoop() {
     if( route.count(target_id) > 0 ){
         rr = route[target_id];
     } else {
-        rr = { (uint8_t)target_id, false, 0.0, 5.0 };
+        rr = { (uint8_t)target_id, false, 0.0, 5.0, -1 };
     }
 
     float error_y = Y_PARK - target_y;
@@ -223,21 +244,11 @@ void ArucoFollowerNode::ctrlLoop() {
         case ROBOT_MOVE:
         {
             if (rr.is_destination) {
-            // THE FIX: Total Position Error
-            // The gas pedal stays pressed as long as EITHER X or Y is broken.
-                float total_pos_error = std::sqrt((error_x * error_x) + (error_y * error_y));
-                
-                // Keep the sign of Y so the robot naturally reverses if it overshoots the target
-                float speed_mag = KP_Y * total_pos_error;
-                message.linear.x = (error_y >= 0) ? speed_mag : -speed_mag;
+                message.linear.x = KP_Y * error_y;
 
-                // Only lock onto the final parking angle once the physical chassis is safely inside the target box
-                if( std::abs(error_y) <= UNCERTAINTY && std::abs(error_x) <= UNCERTAINTY ){
-                    float final_angle = ANGLE_PARK - target_angle;
-                    final_angle = atan2(sin(final_angle), cos(final_angle));
-                    message.angular.z = -(KP_ERR_ANGLE * final_angle);
-                } else {
-                    // Keep carving the Cascade arc to fix X
+                if( std::abs(error_y) <= UNCERTAINTY ){
+                    message.angular.z = -(KP_ERR_ANGLE * raw_angle);
+                }else{
                     message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
             } else {
@@ -247,8 +258,8 @@ void ArucoFollowerNode::ctrlLoop() {
                 angle_brake = std::pow(std::cos(raw_angle), 5.0);
 
                 // Slows down the forward speed by up to 70% if the robot is far off-center
-                x_brake = std::max(0.0f, 1.0f - (std::abs(error_x) / 300.0f));
-
+                x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
+                
                 message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
             }
             
