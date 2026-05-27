@@ -115,7 +115,7 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
 #define KP_Y            0.00037
 #define KP_X            0.00021
 #define KP_ERR_ANGLE    0.127
-#define KP_DYN_ANGLE    0.004
+#define KP_DYN_ANGLE    0.001
 
 // Motor limits
 #define SPEED_LINEAR    0.2
@@ -139,23 +139,24 @@ void ArucoFollowerNode::ctrlLoop() {
     // If 1 second passes with no new data, we lost the marker
     bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    float error_y = Y_PARK - target_y;
-    float error_x = X_PARK - target_x;
-
-    float raw_angle = ANGLE_PARK - target_angle;
-    raw_angle = atan2(sin(raw_angle), cos(raw_angle));
-
-    float dyn_angle = ANGLE_PARK + atan(KP_DYN_ANGLE*error_x);
-
-    float error_angle = dyn_angle - target_angle;
-    error_angle = atan2(sin(error_angle), cos(error_angle));
-
     robot_route_t rr = route[target_id];
     if( route.count(target_id) > 0 ){
         rr = route[target_id];
     } else {
         rr = { (uint8_t)target_id, false, 0.0, 5.0 };
     }
+
+    float error_y = Y_PARK - target_y;
+    float error_x = X_PARK - target_x;
+
+    float raw_angle = ANGLE_PARK - target_angle;
+    raw_angle = atan2(sin(raw_angle), cos(raw_angle));
+
+    float dyn_x = (!rr.is_destination && (std::abs(error_x) < 200.0)) ? 0.0 : error_x;
+    float dyn_angle = ANGLE_PARK + atan(KP_DYN_ANGLE*dyn_x);
+
+    float error_angle = dyn_angle - target_angle;
+    error_angle = atan2(sin(error_angle), cos(error_angle));
 
     bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
     bool ready_to_park = (rr.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
