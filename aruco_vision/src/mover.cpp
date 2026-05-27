@@ -152,7 +152,7 @@ void ArucoFollowerNode::ctrlLoop() {
     float raw_angle = ANGLE_PARK - target_angle;
     raw_angle = atan2(sin(raw_angle), cos(raw_angle));
 
-    float dyn_x = (!rr.is_destination && (std::abs(error_x) < 200.0)) ? 0.0 : error_x;
+    float dyn_x = (!rr.is_destination && (std::abs(error_x) < 300.0)) ? 0.0 : error_x;
     float dyn_angle = ANGLE_PARK + atan(KP_DYN_ANGLE*dyn_x);
 
     float error_angle = dyn_angle - target_angle;
@@ -217,31 +217,51 @@ void ArucoFollowerNode::ctrlLoop() {
     message.linear.x = 0.0;
     message.angular.z = 0.0;
 
-    float angle_brake = 0.0, x_brake = 0.0;
+    // float angle_brake = 0.0, x_brake = 0.0;
 
     switch (rs) {
         case ROBOT_MOVE:
         {
-            if (rr.is_destination) {
-                message.linear.x = KP_Y * error_y;
+            // if (rr.is_destination) {
+            //     message.linear.x = KP_Y * error_y;
 
-                if( std::abs(error_y) <= UNCERTAINTY ){
-                    float test_angle = ANGLE_PARK - target_angle;
-                    test_angle = atan2(sin(test_angle), cos(test_angle));
-                    message.angular.z = -(KP_ERR_ANGLE * test_angle);
-                }else{
+            //     if( std::abs(error_y) <= UNCERTAINTY ){
+            //         float test_angle = ANGLE_PARK - target_angle;
+            //         test_angle = atan2(sin(test_angle), cos(test_angle));
+            //         message.angular.z = -(KP_ERR_ANGLE * test_angle);
+            //     }else{
+            //         message.angular.z = -(KP_ERR_ANGLE * error_angle);
+            //     }
+            // } else {
+            //     message.angular.z = -(KP_ERR_ANGLE * error_angle);
+
+            //     // Uses the raw angle so it only drives fast when pointing perfectly straight
+            //     angle_brake = std::pow(std::cos(raw_angle), 5.0);
+
+            //     // Slows down the forward speed by up to 70% if the robot is far off-center
+            //     x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
+                
+            //     message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+            // }
+
+            if (rr.is_destination) {
+            // THE FIX: Total Position Error
+            // The gas pedal stays pressed as long as EITHER X or Y is broken.
+                float total_pos_error = std::sqrt((error_x * error_x) + (error_y * error_y));
+                
+                // Keep the sign of Y so the robot naturally reverses if it overshoots the target
+                float speed_mag = KP_Y * total_pos_error;
+                message.linear.x = (error_y >= 0) ? speed_mag : -speed_mag;
+
+                // Only lock onto the final parking angle once the physical chassis is safely inside the target box
+                if( std::abs(error_y) <= UNCERTAINTY && std::abs(error_x) <= UNCERTAINTY ){
+                    float final_angle = ANGLE_PARK - target_angle;
+                    final_angle = atan2(sin(final_angle), cos(final_angle));
+                    message.angular.z = -(KP_ERR_ANGLE * final_angle);
+                } else {
+                    // Keep carving the Cascade arc to fix X
                     message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
-            } else {
-                message.angular.z = -(KP_ERR_ANGLE * error_angle);
-
-                // Uses the raw angle so it only drives fast when pointing perfectly straight
-                angle_brake = std::pow(std::cos(raw_angle), 5.0);
-
-                // Slows down the forward speed by up to 70% if the robot is far off-center
-                x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
-                
-                message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
             }
             
             if (message.linear.x > SPEED_LINEAR)
