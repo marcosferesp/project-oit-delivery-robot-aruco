@@ -82,7 +82,11 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
     cv::aruco::detectMarkers(cv_ptr->image, dictionary, markerCorners, markerIds);
 
     double distance = 0.0;
-    float marker_angle = 0.0, center_x = 0.0, center_y = 0.0; //, dx = 0.0, dy = 0.0, marker_angle = 0.0;
+    float center_x = 0.0, center_y = 0.0, dx = 0.0, dy = 0.0, marker_angle = 0.0;
+    float c0x = 0.0, c1x = 0.0, c2x = 0.0, c3x = 0.0;
+    float c0y = 0.0, c1y = 0.0, c2y = 0.0, c3y = 0.0;
+    float top_mid_x = 0.0, top_mid_y = 0.0, bot_mid_x = 0.0, bot_mid_y = 0.0;
+
     geometry_msgs::msg::Point coord_msg;
     std_msgs::msg::Int32 id_msg;
 
@@ -94,34 +98,45 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
         for (size_t i = 0; i < markerIds.size(); i++) {
             distance = tvecs[i][2];
 
-            // Average the 4 corners to find the exact center pixel of the marker
-            center_x = (markerCorners[0][0].x + markerCorners[0][1].x + markerCorners[0][2].x + markerCorners[0][3].x) / 4.0;
-            center_y = (markerCorners[0][0].y + markerCorners[0][1].y + markerCorners[0][2].y + markerCorners[0][3].y) / 4.0;
+            // Extract the raw corners for exhaustive telemetry
+            c0x = markerCorners[i][0].x, c0y = markerCorners[i][0].y;
+            c1x = markerCorners[i][1].x, c1y = markerCorners[i][1].y;
+            c2x = markerCorners[i][2].x, c2y = markerCorners[i][2].y;
+            c3x = markerCorners[i][3].x, c3y = markerCorners[i][3].y;
+
+            center_x = (c0x + c1x + c2x + c3x) / 4.0;
+            center_y = (c0y + c1y + c2y + c3y) / 4.0;
             coord_msg.x = center_x;
             coord_msg.y = center_y;
 
-            // // Calculate the difference in X and Y between Top-Right corner and Top-Left then calculate the angle in radians to know the ArUco orientation
-            // dx = markerCorners[0][1].x - markerCorners[0][0].x;
-            // dy = markerCorners[0][1].y - markerCorners[0][0].y;
-            // marker_angle = atan2(dy, dx);
-            // coord_msg.z = marker_angle;
+            // 1. Find the exact midpoints
+            top_mid_x = (c0x + c1x) / 2.0;
+            top_mid_y = (c0y + c1y) / 2.0;
+            bot_mid_x = (c2x + c3x) / 2.0;
+            bot_mid_y = (c2y + c3y) / 2.0;
 
-            // Convert the 3D rotation vector (rvecs) into a 3x3 rotation matrix
-            cv::Mat R;
-            cv::Rodrigues(rvecs[i], R);
+            // 2. Calculate the 2D vector
+            dx = top_mid_x - bot_mid_x;
+            dy = top_mid_y - bot_mid_y;
 
-            // Extract the true planar rotation (Yaw).
-            // This is physically immune to 2D lens distortion and edge-of-screen trapezoids.
-            marker_angle = atan2(R.at<double>(1,0), R.at<double>(0,0));
+            // 3. True 2D rotation
+            marker_angle = atan2(dx, -dy);
             coord_msg.z = marker_angle;
 
             coord_pub_->publish(coord_msg);
-
-             // Send the ID of the primary marker detected
             id_msg.data = markerIds[i];
             id_pub_->publish(id_msg);
 
-            RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away (center at X=%.1f, Y=%.1f)", markerIds[i], distance, center_x, center_y);
+            // =========================================================================
+            // EXHAUSTIVE DETECTOR LOGGING
+            // =========================================================================
+            RCLCPP_INFO(this->get_logger(), "==== DETECTOR CALCS [ID: %d] ====", markerIds[i]);
+            RCLCPP_INFO(this->get_logger(), "Corners -> TL: %.1f,%.1f | TR: %.1f,%.1f | BR: %.1f,%.1f | BL: %.1f,%.1f", c0x, c0y, c1x, c1y, c2x, c2y, c3x, c3y);
+            RCLCPP_INFO(this->get_logger(), "Midpts  -> TOP: %.1f,%.1f | BOT: %.1f,%.1f", top_mid_x, top_mid_y, bot_mid_x, bot_mid_y);
+            RCLCPP_INFO(this->get_logger(), "Vector  -> dx: %.1f | dy: %.1f", dx, dy);
+            RCLCPP_INFO(this->get_logger(), "Output  -> Dist: %.2fm | Cntr: %.1f,%.1f | Angle: %.4f rad", distance, center_x, center_y, marker_angle);
+            // RCLCPP_INFO(this->get_logger(), "ArUco ID %d detected at %.2f meters away. Center is at X=%.1f, Y=%.1f. ", markerIds[i], distance, center_x, center_y);
+            // =========================================================================
         }
     }
 }

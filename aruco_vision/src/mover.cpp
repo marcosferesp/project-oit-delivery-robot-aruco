@@ -160,12 +160,16 @@ void ArucoFollowerNode::ctrlLoop() {
     // If 1 second passes with no new data, we lost the marker
     bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    robot_route_t rr = route[target_id];
+    robot_route_t rr;
     if( route.count(target_id) > 0 ){
         rr = route[target_id];
     } else {
         rr = { (uint8_t)target_id, false, 0.0, 5.0, -1 };
     }
+
+    RCLCPP_INFO(this->get_logger(), "==== MOVER INPUTS ====");
+    RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, rr.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
+    RCLCPP_INFO(this->get_logger(), "Coords -> X: %.1f | Y: %.1f | Ang: %.4f", target_x, target_y, target_angle);
 
     float error_y = Y_PARK - target_y;
     float error_x = X_PARK - target_x;
@@ -173,11 +177,15 @@ void ArucoFollowerNode::ctrlLoop() {
     float raw_angle = ANGLE_PARK - target_angle;
     raw_angle = atan2(sin(raw_angle), cos(raw_angle));
 
-    float dyn_x = (!rr.is_destination && (std::abs(error_x) < 300.0)) ? 0.0 : error_x;
+    float dyn_x = (!rr.is_destination) ? 0.0 : error_x;
     float dyn_angle = ANGLE_PARK - atan(KP_DYN_ANGLE*dyn_x);
 
     float error_angle = dyn_angle - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
+
+    RCLCPP_INFO(this->get_logger(), "==== MOVER MATH ====");
+    RCLCPP_INFO(this->get_logger(), "Errors -> ErrX: %.1f | ErrY: %.1f", error_x, error_y);
+    RCLCPP_INFO(this->get_logger(), "Angles -> raw_ang: %.4f | dyn_x: %.1f | dyn_ang: %.4f | err_ang: %.4f", raw_angle, dyn_x, dyn_angle, error_angle);
 
     bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
     bool ready_to_park = (rr.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
@@ -254,13 +262,17 @@ void ArucoFollowerNode::ctrlLoop() {
             } else {
                 message.angular.z = -(KP_ERR_ANGLE * error_angle);
 
-                // Uses the raw angle so it only drives fast when pointing perfectly straight
-                angle_brake = std::pow(std::cos(raw_angle), 5.0);
-
-                // Slows down the forward speed by up to 70% if the robot is far off-center
-                x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
-                
-                message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+                if (std::abs(raw_angle)>0.05) {
+                    message.linear.x = 0.0;
+                    RCLCPP_INFO(this->get_logger(), "ACTION -> Brake TRIGGERED! abs(raw) = %.4f > 0.05", std::abs(raw_angle));
+                } else {
+                    // Uses the raw angle so it only drives fast when pointing perfectly straight
+                    angle_brake = std::pow(std::cos(raw_angle), 5.0);
+                    // Slows down the forward speed by up to 70% if the robot is far off-center
+                    x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
+                    message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+                    RCLCPP_INFO(this->get_logger(), "ACTION -> Quasi-aligned! Cosine brake active: %.4f", angle_brake);
+                }
             }
             
             if (message.linear.x > SPEED_LINEAR)
@@ -272,8 +284,8 @@ void ArucoFollowerNode::ctrlLoop() {
             if (message.angular.z < -SPEED_ANGULAR)
                 message.angular.z = -SPEED_ANGULAR;
 
-            if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
-            if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
+            // if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
+            // if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
 
             const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH"};
             RCLCPP_INFO(this->get_logger(), 
