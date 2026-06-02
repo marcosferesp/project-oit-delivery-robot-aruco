@@ -11,23 +11,22 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 
-
-/* 
+/*
  * Class MoverNode
- * It inherits from rclcpp::Node to get network communication abilities
+ * Inherits from rclcpp::Node for basic motor debugging
  */
 class MoverNode : public rclcpp::Node {
 public:
-    MoverNode();    // Setup function that will run automatically when the node boots
+    MoverNode();
 
 private:
-    // Callbacks
+    // --- Callbacks ---
     void moveCallback();
 
-    // Publisher
+    // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
-    // Timer
+    // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

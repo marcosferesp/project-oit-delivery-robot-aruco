@@ -10,9 +10,9 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/point.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/int32.hpp"
-#include "geometry_msgs/msg/point.hpp"
 
 typedef enum {
     ROBOT_IDLE,
@@ -26,40 +26,37 @@ typedef struct {
     bool    is_destination;
     float   dist_to_next;
     float   search_timeout;
-    int16_t next_id;        // -1 means there is no next marker.
+    int16_t next_id;        
 } robot_route_t;
 
-/* 
+/*
  * Class ArucoFollowerNode
- * It inherits from rclcpp::Node to get network communication abilities
+ * Inherits from rclcpp::Node to command chassis motors based on ArUco vision logic
  */
 class ArucoFollowerNode : public rclcpp::Node {
 public:
-    ArucoFollowerNode();    // Setup function that will run automatically when the node boots
+    ArucoFollowerNode();
 
 private:
-    // Loop to control the robot`s movement
+    // --- Core Logic ---
     void ctrlLoop();
 
-    // Callbacks
-    // void distanceCallback(const std_msgs::msg::Float32::SharedPtr msg);
+    // --- Callbacks ---
     void coordCallback(const geometry_msgs::msg::Point::SharedPtr msg);
     void idCallback(const std_msgs::msg::Int32::SharedPtr msg);
 
-    // Publisher
+    // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
-    // Subscribers
-    // rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr dist_sub_;
+    // --- Subscribers ---
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr id_sub_;
 
-    // Timer
+    // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
 
-    // Variables
+    // --- Variables ---
     robot_state_t rs;
-    // float dist;
     float target_x;
     float target_y;
     float target_angle;
@@ -68,11 +65,12 @@ private:
     rclcpp::Time time;
     rclcpp::Time search_start_time;
 
-    // The buffers for Phase 2 Latching
+    // --- Buffer Variables --- : Temporary hold for camera data until ID validation is complete
     float temp_x;
     float temp_y;
     float temp_angle;
-    // The Phase 1 Database Array
+
+    // --- Database ---
     std::vector<robot_route_t> route;
 };
 
