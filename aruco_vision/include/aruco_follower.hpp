@@ -68,7 +68,12 @@ private:
     rclcpp::Time time;
     rclcpp::Time search_start_time;
 
-    std::map<int, robot_route_t> route;
+    // The buffers for Phase 2 Latching
+    float temp_x;
+    float temp_y;
+    float temp_angle;
+    // The Phase 1 Database Array
+    std::vector<robot_route_t> route;
 };
 
 #endif //ARUCO_VISION__ARUCO_FOLLOWER_HPP_

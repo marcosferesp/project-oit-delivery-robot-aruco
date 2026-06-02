@@ -60,10 +60,12 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
 
     time = this->now();
 
-    // Init robot route database
-    route[5] = {5, false, 2.0, 15.0,  3}; 
-    route[3] = {3, false, 2.0, 15.0,  4}; 
-    route[4] = {4, true,  0.0, 0.0,  -1};
+    // PHASE 1: DATABASE
+    // We use vector push_back so the array index does NOT have to match the ArUco ID.
+    // Format: {aruco_id, is_destination, dist_to_next, search_timeout, next_id}
+    route.push_back({5, false, 2.0, 15.0,  3}); 
+    route.push_back({3, false, 2.0, 15.0,  4}); 
+    route.push_back({4, true,  0.0, 15.0, -1});
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
@@ -86,10 +88,12 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
  * Output :
  */
 void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
-    target_x = msg->x;
-    target_y = msg->y;
-    target_angle = msg->z;
-    time = this->now();
+    // PHASE 2: THE MEMORY LATCH (Part 1)
+    // We do NOT update the robot's real coordinates or the timeout clock yet.
+    // We hold them in temporary buffers until the Bouncer approves the ID.
+    temp_x = msg->x;
+    temp_y = msg->y;
+    temp_angle = msg->z;
 }
 
 /* 
@@ -100,26 +104,59 @@ void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr
  */
 void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
     int incoming_id = msg->data;
+    bool accept_marker = false;
 
-    if (route.count(incoming_id) == 0) {
-        return; 
+    // PHASE 3: SECURITY FILTER (The Bouncer)
+    // TIER 1: Does this ID even exist in our universe?
+    bool id_exists_in_db = false;
+    int expected_next = -1;
+    
+    for (size_t i = 0; i < route.size(); i++) {
+        if (route[i].aruco_id == incoming_id) {
+            id_exists_in_db = true; // It is a real database entry
+        }
+        if (route[i].aruco_id == target_id) {
+            expected_next = route[i].next_id; // Look up what the current target expects next
+        }
     }
 
+    if (!id_exists_in_db) {
+        return; // Firewall catches a hallucination. Drop the frame immediately.
+    }
+
+    // TIER 2 & 3: State-based ID filtering
     if (rs == ROBOT_SEARCH) {
-        // If we are driving blind, ONLY lock onto the specific next ID we expect
-        if (incoming_id == route[target_id].next_id) {
+        // We are searching. We ONLY accept the next ID we expect (e.g., ID 4), 
+        // OR we re-accept the current ID (e.g., ID 3) if the camera merely blinked.
+        if (incoming_id == expected_next || incoming_id == target_id) {
             target_id = incoming_id;
+            accept_marker = true;
         }
     } 
     else if (rs == ROBOT_IDLE) {
-        // If the robot just booted up, latch onto any valid ID to start the run
+        // Booting up. Accept any valid ID to start the run.
         target_id = incoming_id;
+        accept_marker = true;
     } 
     else {
-        // If we are actively moving or parking under a marker, ignore any other valid markers that flash on screen
+        // We are in MOVE/PARK mode. We MUST ignore everything except our current target ID.
         if (incoming_id == target_id) {
+            accept_marker = true;
+        } else if (incoming_id == expected_next) {
+            // The Smooth Handoff: We see the next destination before fully losing the current one.
             target_id = incoming_id;
+            accept_marker = true;
         }
+    }
+
+    // PHASE 2: THE MEMORY LATCH (Part 2)
+    // The Bouncer approved the ID. Now we lock the coordinates into the robot's memory 
+    // and reset the 1-second visibility timeout clock.
+    if (accept_marker) {
+        target_x = temp_x;
+        target_y = temp_y;
+        target_angle = temp_angle;
+        time = this->now(); 
     }
 }
 
@@ -160,15 +197,28 @@ void ArucoFollowerNode::ctrlLoop() {
     // If 1 second passes with no new data, we lost the marker
     bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
 
-    robot_route_t rr;
-    if( route.count(target_id) > 0 ){
-        rr = route[target_id];
-    } else {
-        rr = { (uint8_t)target_id, false, 0.0, 5.0, -1 };
+    // PHASE 1 & 2: THE POLLING SYSTEM & MEMORY
+    // We poll the database every loop to find the data for our latched target_id.
+    // If we go blind, target_id stops changing, meaning active_route PERMANENTLY holds 
+    // the search_timeout and next_id of the marker we just left!
+    robot_route_t active_route;
+    bool route_found = false;
+    
+    for (size_t i = 0; i < route.size(); i++) {
+        if (route[i].aruco_id == target_id) {
+            active_route = route[i];
+            route_found = true;
+            break;
+        }
+    }
+    
+    // Safety fallback just in case
+    if (!route_found) {
+        active_route = { (uint8_t)target_id, false, 0.0, 5.0, -1 };
     }
 
     RCLCPP_INFO(this->get_logger(), "==== MOVER INPUTS ====");
-    RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, rr.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
+    RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, active_route.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
     RCLCPP_INFO(this->get_logger(), "Coords -> X: %.1f | Y: %.1f | Ang: %.4f", target_x, target_y, target_angle);
 
     float error_y = Y_PARK - target_y;
@@ -177,7 +227,7 @@ void ArucoFollowerNode::ctrlLoop() {
     float raw_angle = ANGLE_PARK - target_angle;
     raw_angle = atan2(sin(raw_angle), cos(raw_angle));
 
-    float dyn_x = (!rr.is_destination) ? 0.0 : error_x;
+    float dyn_x = (!active_route.is_destination) ? 0.0 : error_x;
     float dyn_angle = ANGLE_PARK - atan(KP_DYN_ANGLE*dyn_x);
 
     float error_angle = dyn_angle - target_angle;
@@ -188,9 +238,10 @@ void ArucoFollowerNode::ctrlLoop() {
     RCLCPP_INFO(this->get_logger(), "Angles -> raw_ang: %.4f | dyn_x: %.1f | dyn_ang: %.4f | err_ang: %.4f", raw_angle, dyn_x, dyn_angle, error_angle);
 
     bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
-    bool ready_to_park = (rr.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
+    bool ready_to_park = (active_route.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
     bool robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_x) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
 
+    // PHASE 4: STATE MACHINE FLOW
     switch (rs) {
         case ROBOT_IDLE:
             if( aruco_visible ){
@@ -201,18 +252,20 @@ void ArucoFollowerNode::ctrlLoop() {
                     rs = ROBOT_PARK;
                     RCLCPP_INFO(this->get_logger(), "Target acquired. Parking.");
                 }
-                
             }
             break;
 
         case ROBOT_MOVE:
             if (!aruco_visible) {
-                if (!rr.is_destination) {
+                // (YOUR POINT 1): If we lost sight and it WAS the destination, we stop.
+                // If it was a pass-through marker, we execute the blind sprint search.
+                if (!active_route.is_destination) {
                     rs = ROBOT_SEARCH;
                     search_start_time = now;
-                    RCLCPP_INFO(this->get_logger(), "Marker passed. Entering SEARCH mode.");
+                    RCLCPP_INFO(this->get_logger(), "Marker passed. Entering SEARCH for ID %d. Timeout: %.1fs", active_route.next_id, active_route.search_timeout);
                 } else {
                     rs = ROBOT_IDLE;
+                    RCLCPP_INFO(this->get_logger(), "Arrived at destination but lost sight. Stopping.");
                 }
             } else if( ready_to_park ){
                 rs = ROBOT_PARK;
@@ -233,7 +286,8 @@ void ArucoFollowerNode::ctrlLoop() {
             if (aruco_visible) {
                 rs = ROBOT_MOVE;
                 RCLCPP_INFO(this->get_logger(), "Target ID %d acquired from search. Moving.", target_id);
-            } else if ((now - search_start_time).seconds() > rr.search_timeout) {
+            } else if ((now - search_start_time).seconds() > active_route.search_timeout) {
+                // (YOUR POINT 2): We use the timeout of the active_route (the marker we just left)
                 rs = ROBOT_IDLE;
                 RCLCPP_INFO(this->get_logger(), "Search timeout! Target lost. Idling.");
             }
@@ -251,7 +305,7 @@ void ArucoFollowerNode::ctrlLoop() {
     switch (rs) {
         case ROBOT_MOVE:
         {
-            if (rr.is_destination) {
+            if (active_route.is_destination) {
                 message.linear.x = KP_Y * error_y;
 
                 if( std::abs(error_y) <= UNCERTAINTY ){
@@ -260,9 +314,11 @@ void ArucoFollowerNode::ctrlLoop() {
                     message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
             } else {
-                message.angular.z = -(KP_ERR_ANGLE * error_angle);
+                // PASS-THROUGH ALIGNMENT MATH
+                // Uses raw_angle explicitly because we only care about being parallel to the hall.
+                message.angular.z = -(KP_ERR_ANGLE * raw_angle);
 
-                if (std::abs(raw_angle)>0.05) {
+                if (std::abs(raw_angle) > 0.05) {
                     message.linear.x = 0.0;
                     RCLCPP_INFO(this->get_logger(), "ACTION -> Brake TRIGGERED! abs(raw) = %.4f > 0.05", std::abs(raw_angle));
                 } else {
@@ -275,31 +331,25 @@ void ArucoFollowerNode::ctrlLoop() {
                 }
             }
             
-            if (message.linear.x > SPEED_LINEAR)
-                message.linear.x = SPEED_LINEAR;
-            if (message.linear.x < -SPEED_LINEAR)
-                message.linear.x = -SPEED_LINEAR;
-            if (message.angular.z > SPEED_ANGULAR)
-                message.angular.z = SPEED_ANGULAR;
-            if (message.angular.z < -SPEED_ANGULAR)
-                message.angular.z = -SPEED_ANGULAR;
-
-            // if (std::abs(message.linear.x) < DEADBAND_LINEAR) message.linear.x = 0.0;
-            // if (std::abs(message.angular.z) < DEADBAND_ANGLE) message.angular.z = 0.0;
+            if (message.linear.x > SPEED_LINEAR) message.linear.x = SPEED_LINEAR;
+            if (message.linear.x < -SPEED_LINEAR) message.linear.x = -SPEED_LINEAR;
+            if (message.angular.z > SPEED_ANGULAR) message.angular.z = SPEED_ANGULAR;
+            if (message.angular.z < -SPEED_ANGULAR) message.angular.z = -SPEED_ANGULAR;
 
             const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH"};
             RCLCPP_INFO(this->get_logger(), 
                 "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
-                state_str[rs], target_id, rr.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
+                state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
 
             break;
         }
 
         case ROBOT_SEARCH:
         {
+            // (YOUR POINT 4): The Blind Sprint. Guaranteed parallel from the previous alignment phase.
             message.linear.x = SPEED_LINEAR;
             message.angular.z = 0.0;
-
+            RCLCPP_INFO(this->get_logger(), "FINAL STATE: SEARCH | Sprinting Blindly at Lin: %4.4f", message.linear.x);
             break;
         }
 
