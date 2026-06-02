@@ -13,7 +13,7 @@
 
 using namespace std::chrono_literals;
 
-// #define DEBUG_SIMPLE_MOVE_PUB 1
+// #define DEBUG_SIMPLE_MOVE_PUB
 #define DEBUG_COMMENTS 1
 
 
@@ -70,6 +70,11 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
     
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
+
+    target_id = -1; 
+    target_x = 0.0;
+    target_y = 0.0;
+    target_angle = 0.0;
 
     time = this->now();
 
@@ -197,7 +202,7 @@ void ArucoFollowerNode::ctrlLoop() {
     auto now = this->now();
 
     // If 1 second passes with no new data we lost the marker
-    bool aruco_visible = (now - time).seconds() < ARUCO_TIMEOUT;
+    bool aruco_visible = ((target_id != -1) && ((now - time).seconds() < ARUCO_TIMEOUT));
 
     // Database polling
     robot_route_t active_route;
