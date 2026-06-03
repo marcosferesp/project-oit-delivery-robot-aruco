@@ -54,15 +54,14 @@ void MoverNode::moveCallback() {
 /* 
  * Constructor ArucoFollowerNode
  * Initializes network connections and injects the route sequences into memory
- * Inputs :
+ * Inputs : dest_id (int16_t) : The final ArUco ID requested from the console
  * Output :
  */
-ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_IDLE) {
+ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_node"), rs(ROBOT_IDLE) {
     // --- Publisher ---
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);   // Broadcast velocity commands to the hardware motors
     
     // --- Subscribers ---
-    
     coord_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::coordCallback, this, std::placeholders::_1));   // Listen for calculated 2D coordinates and angles from the detector
     id_sub_ = this->create_subscription<std_msgs::msg::Int32>(
@@ -82,6 +81,25 @@ ArucoFollowerNode::ArucoFollowerNode() : Node("aruco_follower_node"), rs(ROBOT_I
     route.push_back({5, false, 2.0, 15.0,  3}); 
     route.push_back({3, false, 2.0, 15.0,  4}); 
     route.push_back({4, true,  0.0, 15.0, -1});
+
+    bool dest_found = false;
+    for( size_t i=0; i<route.size(); i++ ){
+        if (route[i].aruco_id == dest_id) {
+            // Found the user's request and force it to be the final destination
+            route[i].is_destination = true;
+            route[i].next_id = -1; 
+            dest_found = true;
+        } else {
+            // Ensure no other marker in the map accidentally triggers the parking state
+            route[i].is_destination = false; 
+        }
+    }
+
+    // Abort if the user typed an ID that doesn't exist in the map
+    if (!dest_found) {
+        RCLCPP_ERROR(this->get_logger(), "FATAL: Destination ID %d does not exist in the route database.", dest_id);
+        throw std::runtime_error("Invalid destination ID requested.");
+    }
 
 #if DEBUG_COMMENTS
     RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
@@ -386,10 +404,25 @@ void ArucoFollowerNode::ctrlLoop() {
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
 
+    // Default destination if the user types nothing
+    int16_t dest_id = 4; 
+
+    // Extract non-ROS arguments from the console command
+    std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
+    if (args.size() > 1) {
+        dest_id = std::stoi(args[1]);
+    }
+
 #if DEBUG_SIMPLE_MOVE_PUB
     rclcpp::spin(std::make_shared<MoverNode>());
 #else
-    rclcpp::spin(std::make_shared<ArucoFollowerNode>());
+    try {
+        // Attempt to build and spin the node with the requested ID
+        rclcpp::spin(std::make_shared<ArucoFollowerNode>(dest_id));
+    } catch (const std::runtime_error& e) {
+        // If the ID was invalid, the constructor throws an error and we safely abort here
+        RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "Aborting launch: %s", e.what());
+    }
 #endif // DEBUG_SIMPLE_MOVE_PUB
 
     rclcpp::shutdown();

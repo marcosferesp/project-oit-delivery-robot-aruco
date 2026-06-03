@@ -35,7 +35,7 @@ typedef struct {
  */
 class ArucoFollowerNode : public rclcpp::Node {
 public:
-    ArucoFollowerNode();
+    ArucoFollowerNode(int16_t dest_id);
 
 private:
     // --- Core Logic ---
