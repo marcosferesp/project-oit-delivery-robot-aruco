@@ -51,6 +51,29 @@ void MoverNode::moveCallback() {
 #endif // DEBUG_SIMPLE_MOVE_PUB
 
 
+// Parking targets & tolerances
+#define X_PARK          960.0
+#define Y_PARK          540.0
+#define UNCERTAINTY     30.0
+#define HYSTERESIS      80.0
+#define ANGLE_PARK      0.0
+#define ANGLE_UNCE      0.2
+#define ANGLE_HYST      0.35
+
+// Proportional gains
+#define KP_Y            0.00037
+#define KP_X            0.00021
+#define KP_ERR_ANGLE    0.127
+#define KP_DYN_ANGLE    0.001
+
+// Motor limits
+#define SPEED_LINEAR    0.2
+#define SPEED_ANGULAR   0.4
+
+// Timeout
+#define ARUCO_TIMEOUT   1.0
+
+
 /* 
  * Constructor ArucoFollowerNode
  * Initializes network connections and injects the route sequences into memory
@@ -74,6 +97,7 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     target_x = 0.0;
     target_y = 0.0;
     target_angle = 0.0;
+    corner_turn = false;
 
     time = this->now();
 
@@ -146,6 +170,8 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
     int incoming_id = msg->data;
     bool accept_marker = false;
 
+    int previous_id = target_id;
+
     bool id_exists_in_db = false;
     int expected_next = -1;
     
@@ -180,16 +206,33 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
         if (incoming_id == target_id) {
             accept_marker = true;
         } 
-        // Accept the next destination if it appears before the current one disappears
+        // Accept the next destination if it appears before the current one disappears under some conditions
         else if (incoming_id == expected_next) {
-            target_id = incoming_id;
-            accept_marker = true;
+            // Do not accept the next marker unless we have physically arrived at the current one
+            bool y_close = (std::abs(Y_PARK - target_y) < 80.0);
+
+            // The robot has to finish pivoting
+            float cra = ANGLE_PARK - target_angle;
+            cra = atan2(sin(cra), cos(cra));
+            bool has_turned = (std::abs(cra) < 0.05);
+
+            // It is safe to switch targets if we are not in a corner or if the corner turn is completely finished
+            bool safe_switch = (!corner_turn || has_turned);
+
+            if (y_close && safe_switch) {
+                target_id = incoming_id;
+                accept_marker = true;
+            }
         }
     }
 
     // --- Memory Latch ---
     // If the ID is approved, permanently commit the buffered coordinates to memory
     if (accept_marker) {
+        // If the robot accepts a new ID it resets the corner latch
+        if (previous_id != incoming_id) {
+            corner_turn = false;
+        }
         target_x = temp_x;
         target_y = temp_y;
         target_angle = temp_angle;
@@ -197,28 +240,6 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
         time = this->now(); 
     }
 }
-
-// Parking targets & tolerances
-#define X_PARK          960.0
-#define Y_PARK          540.0
-#define UNCERTAINTY     30.0
-#define HYSTERESIS      80.0
-#define ANGLE_PARK      0.0
-#define ANGLE_UNCE      0.2
-#define ANGLE_HYST      0.35
-
-// Proportional gains
-#define KP_Y            0.00037
-#define KP_X            0.00021
-#define KP_ERR_ANGLE    0.127
-#define KP_DYN_ANGLE    0.001
-
-// Motor limits
-#define SPEED_LINEAR    0.2
-#define SPEED_ANGULAR   0.4
-
-// Timeout
-#define ARUCO_TIMEOUT   1.0
 
 /* 
  * Function ctrlLoop
@@ -362,10 +383,17 @@ void ArucoFollowerNode::ctrlLoop() {
                     message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
             } else {    // Pass-through
-                // We advance to correct Y coordinate as much possible before aligning
-                if (std::abs(error_y) > 100) {
+                if (std::abs(error_y) < 80) {
+                    corner_turn = true;
+                }
+                if (!corner_turn) {
+                    // We advance to correct Y coordinate as much possible before aligning
                     message.angular.z = 0.0;
-                    message.linear.x = SPEED_LINEAR;
+                    if (error_y > 0.0) {
+                        message.linear.x = SPEED_LINEAR;   // Marker is ahead
+                    } else {
+                        message.linear.x = -SPEED_LINEAR;  // Marker is behind
+                    }
                 } else {
                     // Uses raw_angle explicitly because we only care about being parallel to the hallway
                     message.angular.z = -(KP_ERR_ANGLE * raw_angle);

@@ -61,6 +61,7 @@ private:
     float target_y;
     float target_angle;
     int target_id;
+    bool corner_turn;
 
     rclcpp::Time time;
     rclcpp::Time search_start_time;
