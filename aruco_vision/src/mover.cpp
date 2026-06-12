@@ -102,9 +102,9 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     time = this->now();
 
     // --- Route Database Init ---
-    route.push_back({5, false, 2.0, 15.0,  3}); 
-    route.push_back({3, false, 2.0, 15.0,  4}); 
-    route.push_back({4, true,  0.0, 15.0, -1});
+    route.push_back({5, false, 2.0, 15.0,  3, false}); 
+    route.push_back({3, false, 2.0, 15.0,  4, false}); 
+    route.push_back({4, true,  0.0, 15.0, -1, false});
 
     // If the main sent -1 (no argument input), find the endpoint of the current database automatically
     if (dest_id == -1) {
@@ -173,12 +173,14 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
     int previous_id = target_id;
 
     bool id_exists_in_db = false;
+    bool id_visited = false;
     int expected_next = -1;
     
     // Poll the database to check if the incoming ID exists in our planned route
     for (size_t i = 0; i < route.size(); i++) {
         if (route[i].aruco_id == incoming_id) {
-            id_exists_in_db = true; 
+            id_exists_in_db = true;
+            id_visited = route[i].visited;
         }
         // Look up the expected next destination based on our current target
         if (route[i].aruco_id == target_id) {
@@ -187,7 +189,7 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
     }
 
     // Drop the frame instantly if the camera hallucinates an unregistered ID
-    if (!id_exists_in_db) return; 
+    if (!id_exists_in_db || id_visited) return; 
 
     if (rs == ROBOT_SEARCH) {
         // Search State: Only accept the planned next destination, OR recover the previous ID if the camera blinked
@@ -232,6 +234,12 @@ void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
         // If the robot accepts a new ID it resets the corner latch
         if (previous_id != incoming_id) {
             corner_turn = false;
+            for (size_t i = 0; i < route.size(); i++) {
+                if (route[i].aruco_id == previous_id) {
+                    route[i].visited = true;
+                    break;
+                }
+            }
         }
         target_x = temp_x;
         target_y = temp_y;
@@ -269,7 +277,7 @@ void ArucoFollowerNode::ctrlLoop() {
     
     // Prevent memory faults
     if (!route_found) {
-        active_route = { (uint8_t)target_id, false, 0.0, 5.0, -1 };
+        active_route = { (uint8_t)target_id, false, 0.0, 5.0, -1, false };
     }
 
 #if DEBUG_COMMENTS

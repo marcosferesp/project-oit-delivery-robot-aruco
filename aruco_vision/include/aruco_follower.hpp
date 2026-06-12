@@ -26,7 +26,8 @@ typedef struct {
     bool    is_destination;
     float   dist_to_next;
     float   search_timeout;
-    int16_t next_id;        
+    int16_t next_id;
+    bool    visited;
 } robot_route_t;
 
 /*
