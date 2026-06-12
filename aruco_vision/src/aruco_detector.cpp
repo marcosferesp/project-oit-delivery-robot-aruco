@@ -25,8 +25,9 @@ ArucoDetectorNode::ArucoDetectorNode() : Node("aruco_detector_node"), got_camera
         "/image_raw", 10, std::bind(&ArucoDetectorNode::imageCallback, this, std::placeholders::_1));   // Listen to the raw video stream broadcasted by the camera
 
     // --- Publishers ---
-    coord_pub_ = this->create_publisher<geometry_msgs::msg::Point>("/aruco_coordinates", 10);   // Broadcast the 2D pixel coordinates and calculated rotation angle
-    id_pub_ = this->create_publisher<std_msgs::msg::Int32>("/aruco_id", 10);                    // Broadcast the ID number of the recognized ArUco marker
+    // coord_pub_ = this->create_publisher<geometry_msgs::msg::Point>("/aruco_coordinates", 10);   // Broadcast the 2D pixel coordinates and calculated rotation angle
+    // id_pub_ = this->create_publisher<std_msgs::msg::Int32>("/aruco_id", 10);                    // Broadcast the ID number of the recognized ArUco marker
+    coord_pub_ = this->create_publisher<geometry_msgs::msg::Quaternion>("/aruco_coordinates", 10);
 
     RCLCPP_INFO(this->get_logger(), "ArUco Brain is online and waiting for video...");
 }
@@ -95,8 +96,10 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
     float c0y = 0.0, c1y = 0.0, c2y = 0.0, c3y = 0.0;
     float top_mid_x = 0.0, top_mid_y = 0.0, bot_mid_x = 0.0, bot_mid_y = 0.0;
 
-    geometry_msgs::msg::Point coord_msg;
-    std_msgs::msg::Int32 id_msg;
+    // geometry_msgs::msg::Point coord_msg;
+    // std_msgs::msg::Int32 id_msg;
+
+    geometry_msgs::msg::Quaternion coord_msg;
 
     // Only process physics if at least one valid marker was found
     if (markerIds.size() > 0) {
@@ -125,7 +128,6 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
             top_mid_y = (c0y + c1y) / 2.0;
             bot_mid_x = (c2x + c3x) / 2.0;
             bot_mid_y = (c2y + c3y) / 2.0;
-
             // Calculate the 2D directional vector pointing from the bottom to the top
             dx = top_mid_x - bot_mid_x;
             dy = top_mid_y - bot_mid_y;
@@ -134,12 +136,15 @@ void ArucoDetectorNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr m
             marker_angle = atan2(dx, -dy);
             coord_msg.z = marker_angle;
 
+            // Send the ID of this specific marker to the mover node
+            coord_msg.w = markerIds[i];
+
             // Send coordinates to the mover node
             coord_pub_->publish(coord_msg);
             
-            // Send the ID of this specific marker to the mover node
-            id_msg.data = markerIds[i];
-            id_pub_->publish(id_msg);
+            // // Send the ID of this specific marker to the mover node
+            // id_msg.data = markerIds[i];
+            // id_pub_->publish(id_msg);
 
 #if DEBUG_COMMENTS
             // Extract the physical depth distance (Z-axis translation vector)

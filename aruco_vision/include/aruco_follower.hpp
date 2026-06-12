@@ -11,6 +11,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/point.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/int32.hpp"
 
@@ -43,15 +44,17 @@ private:
     void ctrlLoop();
 
     // --- Callbacks ---
-    void coordCallback(const geometry_msgs::msg::Point::SharedPtr msg);
-    void idCallback(const std_msgs::msg::Int32::SharedPtr msg);
+    // void coordCallback(const geometry_msgs::msg::Point::SharedPtr msg);
+    // void idCallback(const std_msgs::msg::Int32::SharedPtr msg);
+    void arucoCallback(const geometry_msgs::msg::Quaternion::SharedPtr msg);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
     // --- Subscribers ---
-    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
-    rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr id_sub_;
+    // rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
+    // rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr id_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
@@ -68,9 +71,9 @@ private:
     rclcpp::Time search_start_time;
 
     // --- Buffer Variables --- : Temporary hold for camera data until ID validation is complete
-    float temp_x;
-    float temp_y;
-    float temp_angle;
+    // float temp_x;
+    // float temp_y;
+    // float temp_angle;
 
     // --- Database ---
     std::vector<robot_route_t> route;
