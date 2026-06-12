@@ -82,6 +82,17 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     route.push_back({3, false, 2.0, 15.0,  4}); 
     route.push_back({4, true,  0.0, 15.0, -1});
 
+    // If the main sent -1 (no argument input), find the endpoint of the current database automatically
+    if (dest_id == -1) {
+        for (size_t i = 0; i < route.size(); i++) {
+            if (route[i].next_id == -1) {
+                dest_id = route[i].aruco_id;
+                RCLCPP_INFO(this->get_logger(), "No console arg given. Auto-selected default destination: ID %d", dest_id);
+                break;
+            }
+        }
+    }
+
     bool dest_found = false;
     for( size_t i=0; i<route.size(); i++ ){
         if (route[i].aruco_id == dest_id) {
@@ -351,19 +362,25 @@ void ArucoFollowerNode::ctrlLoop() {
                     message.angular.z = -(KP_ERR_ANGLE * error_angle);
                 }
             } else {    // Pass-through
-                // Uses raw_angle explicitly because we only care about being parallel to the hallway
-                message.angular.z = -(KP_ERR_ANGLE * raw_angle);
-
-                // Instantly kill forward movement if angular threshold is too high
-                if (std::abs(raw_angle) > 0.05) {
-                    message.linear.x = 0.0;
-                    RCLCPP_INFO(this->get_logger(), "Brake -> abs(raw) = %.4f > 0.05", std::abs(raw_angle));
+                // We advance to correct Y coordinate as much possible before aligning
+                if (std::abs(error_y) > 100) {
+                    message.angular.z = 0.0;
+                    message.linear.x = SPEED_LINEAR;
                 } else {
-                    // Uses the raw angle so it only drives fast when pointing perfectly straight
-                    angle_brake = std::pow(std::cos(raw_angle), 5.0);
-                    // Slows down the forward speed by up to 70% if the robot is far off-center
-                    x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
-                    message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+                    // Uses raw_angle explicitly because we only care about being parallel to the hallway
+                    message.angular.z = -(KP_ERR_ANGLE * raw_angle);
+
+                    // Instantly kill forward movement if angular threshold is too high
+                    if (std::abs(raw_angle) > 0.05) {
+                        message.linear.x = 0.0;
+                        RCLCPP_INFO(this->get_logger(), "Brake -> abs(raw) = %.4f > 0.05", std::abs(raw_angle));
+                    } else {
+                        // Uses the raw angle so it only drives fast when pointing perfectly straight
+                        angle_brake = std::pow(std::cos(raw_angle), 5.0);
+                        // Slows down the forward speed by up to 70% if the robot is far off-center
+                        x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
+                        message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+                    }
                 }
             }
             
@@ -405,12 +422,12 @@ int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
 
     // Default destination if the user types nothing
-    int16_t dest_id = 4; 
+    int16_t dest_id = -1; 
 
     // Extract non-ROS arguments from the console command
     std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
     if (args.size() > 1) {
-        dest_id = std::stoi(args[1]);
+        dest_id = static_cast<int16_t>(std::stoi(args[1]));
     }
 
 #if DEBUG_SIMPLE_MOVE_PUB
