@@ -48,12 +48,14 @@ private:
 
     // --- Callbacks ---
     void arucoCallback(const geometry_msgs::msg::Quaternion::SharedPtr msg);
+    void taxiCallback(const std_msgs::msg::Int32::SharedPtr msg);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
     // --- Subscribers ---
     rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
+    rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr taxi_sub_;
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;

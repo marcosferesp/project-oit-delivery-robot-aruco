@@ -89,6 +89,9 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     aruco_sub_ = this->create_subscription<geometry_msgs::msg::Quaternion>(
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
     
+    taxi_sub_ = this->create_subscription<std_msgs::msg::Int32>(
+        "/taxi_command", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));         
+    
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
 
@@ -240,6 +243,30 @@ void ArucoFollowerNode::arucoCallback(const geometry_msgs::msg::Quaternion::Shar
         target_angle = incoming_angle;
         
         time = this->now(); 
+    }
+}
+
+/*
+ * Function taxiCallback
+ * Receives live terminal inputs, validates them with the database and pushes valid IDs into the FIFO queue.
+ */
+void ArucoFollowerNode::taxiCallback(const std_msgs::msg::Int32::SharedPtr msg) {
+    int new_id = msg->data;
+    bool is_valid = false;
+
+    // Validate the input with the route database
+    for (size_t i = 0; i < route.size(); i++) {
+        if (route[i].aruco_id == new_id) {
+            is_valid = true;
+            break;
+        }
+    }
+
+    if (is_valid) {
+        rteQue.push(new_id);
+        RCLCPP_INFO(this->get_logger(), "\033[1;32m[LIVE COMMAND] ID %d added to the FIFO Queue!\033[0m", new_id);
+    } else {
+        RCLCPP_WARN(this->get_logger(), "\033[1;31m[LIVE COMMAND REJECTED] ID %d does not exist in the map.\033[0m", new_id);
     }
 }
 

@@ -39,6 +39,11 @@ add_executable(mover
   src/mover.cpp
 )
 
+# DynamicTerminalInputNode
+add_executable(dispatcher
+  src/dispatcher.cpp
+)
+
 ###################################
 # PART 4 : Glue them all together #
 ###################################
@@ -61,6 +66,12 @@ ament_target_dependencies(mover
   std_msgs
 )
 
+# DynamicTerminalInputNode
+ament_target_dependencies(dispatcher
+  rclcpp
+  std_msgs
+)
+
 ###################################
 # PART 5 : Install everything #####
 ###################################
@@ -68,6 +79,7 @@ ament_target_dependencies(mover
 install(TARGETS
   aruco_detector_node
   mover
+  dispatcher
   DESTINATION lib/${PROJECT_NAME}
 )
 
