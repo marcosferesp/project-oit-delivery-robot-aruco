@@ -19,7 +19,8 @@ typedef enum {
     ROBOT_IDLE,
     ROBOT_MOVE,
     ROBOT_PARK,
-    ROBOT_SEARCH
+    ROBOT_SEARCH,
+    ROBOT_WAIT
 } robot_state_t;
 
 typedef struct {
@@ -42,18 +43,16 @@ public:
 private:
     // --- Core Logic ---
     void ctrlLoop();
+    void resetRoute();
+    void setDest(int16_t dest_id);
 
     // --- Callbacks ---
-    // void coordCallback(const geometry_msgs::msg::Point::SharedPtr msg);
-    // void idCallback(const std_msgs::msg::Int32::SharedPtr msg);
     void arucoCallback(const geometry_msgs::msg::Quaternion::SharedPtr msg);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
     // --- Subscribers ---
-    // rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr coord_sub_;
-    // rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr id_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
 
     // --- Timers ---
@@ -69,14 +68,13 @@ private:
 
     rclcpp::Time time;
     rclcpp::Time search_start_time;
-
-    // --- Buffer Variables --- : Temporary hold for camera data until ID validation is complete
-    // float temp_x;
-    // float temp_y;
-    // float temp_angle;
+    rclcpp::Time wait_time;
 
     // --- Database ---
     std::vector<robot_route_t> route;
+
+    // --- FIFO ---
+    std::queue<int> rteQue;
 };
 
 #endif //ARUCO_VISION__ARUCO_FOLLOWER_HPP_

@@ -72,6 +72,7 @@ void MoverNode::moveCallback() {
 
 // Timeout
 #define ARUCO_TIMEOUT   1.0
+#define WAIT_TIMEOUT    5.0
 
 
 /* 
@@ -84,11 +85,7 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     // --- Publisher ---
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);   // Broadcast velocity commands to the hardware motors
     
-    // --- Subscribers ---
-    // coord_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
-    //     "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::coordCallback, this, std::placeholders::_1));   // Listen for calculated 2D coordinates and angles from the detector
-    // id_sub_ = this->create_subscription<std_msgs::msg::Int32>(
-    //     "/aruco_id", 10, std::bind(&ArucoFollowerNode::idCallback, this, std::placeholders::_1));               // Listen for recognized ArUco IDs from the detector
+    // --- Subscriber ---
     aruco_sub_ = this->create_subscription<geometry_msgs::msg::Quaternion>(
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
     
@@ -108,23 +105,21 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     route.push_back({3, false, 2.0, 15.0,  4, false}); 
     route.push_back({4, true,  0.0, 15.0, -1, false});
 
-    // If the main sent -1 (no argument input), find the endpoint of the current database automatically
-    if (dest_id == -1) {
-        for (size_t i = 0; i < route.size(); i++) {
-            if (route[i].next_id == -1) {
-                dest_id = route[i].aruco_id;
-                RCLCPP_INFO(this->get_logger(), "No console arg given. Auto-selected default destination: ID %d", dest_id);
-                break;
-            }
-        }
-    }
+    // route.push_back({2, false, 2.0, 15.0,  0, false});
+    // route.push_back({0, false, 4.0, 30.0,  1, false});
+    // route.push_back({1, false, 1.5, 15.0,  6, false});
+    // route.push_back({6, false, 4.0, 30.0,  7, false});
+    // route.push_back({7, false, 1.5, 15.0,  0, false});
+
+    // Test Static Queue
+    rteQue.push(1);
+    rteQue.push(0);
 
     bool dest_found = false;
     for( size_t i=0; i<route.size(); i++ ){
         if (route[i].aruco_id == dest_id) {
             // Found the user's request and force it to be the final destination
             route[i].is_destination = true;
-            route[i].next_id = -1; 
             dest_found = true;
         } else {
             // Ensure no other marker in the map accidentally triggers the parking state
@@ -148,110 +143,6 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
-
-// /* 
-//  * Function coordCallback
-//  * Buffers physical coordinates until the associated ArUco ID passes security checks
-//  * Inputs : msg (geometry_msgs::msg::Point::SharedPtr) : X, Y, and Angle data
-//  * Output :
-//  */
-// void ArucoFollowerNode::coordCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
-//     // Hold incoming coordinate data in temporary memory buffers
-//     temp_x = msg->x;
-//     temp_y = msg->y;
-//     temp_angle = msg->z;
-// }
-
-// /* 
-//  * Function idCallback
-//  * Filters incoming ArUco IDs to prevent hallucinations from corrupting active navigation
-//  * Inputs : msg (std_msgs::msg::Int32::SharedPtr) : Decoded ArUco ID
-//  * Output :
-//  */
-// void ArucoFollowerNode::idCallback(const std_msgs::msg::Int32::SharedPtr msg) {
-//     int incoming_id = msg->data;
-//     bool accept_marker = false;
-
-//     int previous_id = target_id;
-
-//     bool id_exists_in_db = false;
-//     bool id_visited = false;
-//     int expected_next = -1;
-    
-//     // Poll the database to check if the incoming ID exists in our planned route
-//     for (size_t i = 0; i < route.size(); i++) {
-//         if (route[i].aruco_id == incoming_id) {
-//             id_exists_in_db = true;
-//             id_visited = route[i].visited;
-//         }
-//         // Look up the expected next destination based on our current target
-//         if (route[i].aruco_id == target_id) {
-//             expected_next = route[i].next_id; 
-//         }
-//     }
-
-//     // Drop the frame instantly if the camera hallucinates an unregistered ID or sees one it already visited
-//     if (!id_exists_in_db || id_visited) {
-//         RCLCPP_INFO(this->get_logger(), "ID %d rejected", incoming_id);
-//         return;
-//     }
-
-//     if (rs == ROBOT_SEARCH) {
-//         // Search State: Only accept the planned next destination, OR recover the previous ID if the camera blinked
-//         if (incoming_id == expected_next || incoming_id == target_id) {
-//             target_id = incoming_id;
-//             accept_marker = true;
-//         }
-//     } 
-//     else if (rs == ROBOT_IDLE) {
-//         // Booting State: Accept any valid ID to commence a run
-//         target_id = incoming_id;
-//         accept_marker = true;
-//     } 
-//     else {
-//         // Locked State (Move/Park): Reject everything except our active target
-//         if (incoming_id == target_id) {
-//             accept_marker = true;
-//         } 
-//         // Accept the next destination if it appears before the current one disappears under some conditions
-//         else if (incoming_id == expected_next) {
-//             // Do not accept the next marker unless we have physically arrived at the current one
-//             bool y_close = (std::abs(Y_PARK - target_y) < 80.0);
-
-//             // The robot has to finish pivoting
-//             float cra = ANGLE_PARK - target_angle;
-//             cra = atan2(sin(cra), cos(cra));
-//             bool has_turned = (std::abs(cra) < 0.05);
-
-//             // It is safe to switch targets if we are not in a corner or if the corner turn is completely finished
-//             bool safe_switch = (!corner_turn || has_turned);
-
-//             if (y_close && safe_switch) {
-//                 target_id = incoming_id;
-//                 accept_marker = true;
-//             }
-//         }
-//     }
-
-//     // If the ID is approved, permanently commit the buffered coordinates to memory
-//     if (accept_marker) {
-//         // If the robot accepts a new ID it resets the corner latch
-//         if (previous_id != incoming_id) {
-//             corner_turn = false;
-//             for (size_t i = 0; i < route.size(); i++) {
-//                 if (route[i].aruco_id == previous_id) {
-//                     route[i].visited = true;
-//                     break;
-//                 }
-//             }
-//         }
-//         target_x = temp_x;
-//         target_y = temp_y;
-//         target_angle = temp_angle;
-//         // Reset the 1-second visibility timeout clock
-//         time = this->now(); 
-//     }
-// }
 
 /*
  * Function arucoCallback
@@ -352,6 +243,43 @@ void ArucoFollowerNode::arucoCallback(const geometry_msgs::msg::Quaternion::Shar
     }
 }
 
+/*
+ * Function resetRoute
+ * Resets the visited boolean for all markers in the database
+ */
+void ArucoFollowerNode::resetRoute() {
+    for (size_t i = 0; i < route.size(); i++) {
+        route[i].visited = false;
+    }
+#if DEBUG_COMMENTS
+    RCLCPP_INFO(this->get_logger(), "[ROUTE RESET] All route markers have been reset to unvisited.");
+#endif
+}
+
+/*
+ * Function setDest
+ * Sets a new valid destination for the robot
+ */
+void ArucoFollowerNode::setDest(int16_t dest_id) {
+    bool dest_found = false;
+    for( size_t i=0; i<route.size(); i++ ){
+        if (route[i].aruco_id == dest_id) {
+            // Found the user's request and force it to be the final destination
+            route[i].is_destination = true;
+            dest_found = true;
+        } else {
+            // Ensure no other marker in the map accidentally triggers the parking state
+            route[i].is_destination = false; 
+        }
+    }
+
+    // Abort if the user typed an ID that doesn't exist in the map
+    if (!dest_found) {
+        RCLCPP_ERROR(this->get_logger(), "FATAL: Destination ID %d does not exist in the route database.", dest_id);
+        throw std::runtime_error("Invalid destination ID requested.");
+    }
+}
+
 /* 
  * Function ctrlLoop
  * Evaluates the robot's current state and sends motor commands
@@ -417,9 +345,9 @@ void ArucoFollowerNode::ctrlLoop() {
 #endif
 
     // State condition flags
-    bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
-    bool ready_to_park = (active_route.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_x) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
-    bool robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_x) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
+    bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
+    bool ready_to_park = (active_route.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
+    bool robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
 
     switch (rs) {
         case ROBOT_IDLE:
@@ -456,6 +384,9 @@ void ArucoFollowerNode::ctrlLoop() {
             } else if( robot_drifted ){
                 rs = ROBOT_MOVE;
                 RCLCPP_INFO(this->get_logger(), "Robot has drifted. Moving to align.");
+            } else {
+                rs = ROBOT_WAIT;
+                wait_time = now;
             }
             break;
 
@@ -468,6 +399,40 @@ void ArucoFollowerNode::ctrlLoop() {
                 RCLCPP_INFO(this->get_logger(), "Search timeout! Target lost. Idling.");
             }
             break;
+
+        case ROBOT_WAIT:
+        {
+            int dest_id = 7;
+
+            if (robot_drifted) {
+                // Realignment if bumped from its parking position
+                rs = ROBOT_MOVE;
+                break;
+
+            } else if ((now - wait_time).seconds() > WAIT_TIMEOUT) {
+                // Timer expired : get back to default position
+                setDest(dest_id);
+                resetRoute();
+                rs = ROBOT_MOVE; 
+                break;
+            }
+
+            if (!rteQue.empty()) {
+                dest_id = rteQue.front();
+                rteQue.pop();
+                RCLCPP_INFO(this->get_logger(), "FIFO Queue element found : ID %d", dest_id);
+
+                // Set the new destination ID
+                setDest(dest_id);
+                
+                // Wipe the visited locations booleans
+                resetRoute();
+
+                rs = ROBOT_MOVE; 
+                break;
+            }
+            break;
+        }
 
         default:
             break;
@@ -530,7 +495,7 @@ void ArucoFollowerNode::ctrlLoop() {
             if (message.angular.z < -SPEED_ANGULAR) message.angular.z = -SPEED_ANGULAR;
 
 #if DEBUG_COMMENTS
-            const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH"};
+            const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
             RCLCPP_INFO(this->get_logger(), 
                 "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
                 state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
@@ -558,27 +523,45 @@ void ArucoFollowerNode::ctrlLoop() {
  * Main
  */
 int main(int argc, char **argv) {
-    rclcpp::init(argc, argv);
-
-    // Default destination if the user types nothing
-    int16_t dest_id = -1; 
+    rclcpp::init(argc, argv); 
 
     // Extract non-ROS arguments from the console command
     std::vector<std::string> args = rclcpp::remove_ros_arguments(argc, argv);
-    if (args.size() > 1) {
-        dest_id = static_cast<int16_t>(std::stoi(args[1]));
-    }
 
 #if DEBUG_SIMPLE_MOVE_PUB
+
     rclcpp::spin(std::make_shared<MoverNode>());
+
 #else
+
+    // Abort if user forgot ID argument
+    if (args.size() < 2) {
+        RCLCPP_FATAL(rclcpp::get_logger("rclcpp"), "Launch aborted: No destination ID provided.");
+        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Usage: ros2 run aruco_vision mover_node <destination_id>");
+        rclcpp::shutdown();
+        return 1;
+    }
+
+    // Default destination if the user types nothing
+    int16_t dest_id = -1;
+    
     try {
-        // Attempt to build and spin the node with the requested ID
+        dest_id = static_cast<int16_t>(std::stoi(args[1]));
+    } catch (const std::invalid_argument& e) {
+        // Abort if the user typed letters instead of a number
+        RCLCPP_FATAL(rclcpp::get_logger("rclcpp"), "Launch aborted: Destination ID must be a valid number.");
+        rclcpp::shutdown();
+        return 1;
+    }
+
+    try {
+        // Attempt to build and spin the node with the validated ID
         rclcpp::spin(std::make_shared<ArucoFollowerNode>(dest_id));
     } catch (const std::runtime_error& e) {
-        // If the ID was invalid, the constructor throws an error and we safely abort here
+        // If the ID is a valid number but doesn't exist in our map, safely abort
         RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "Aborting launch: %s", e.what());
     }
+    
 #endif // DEBUG_SIMPLE_MOVE_PUB
 
     rclcpp::shutdown();
