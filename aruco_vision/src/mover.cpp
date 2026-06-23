@@ -101,15 +101,15 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     time = this->now();
 
     // --- Route Database Init ---
-    route.push_back({5, false, 2.0, 15.0,  3, false}); 
-    route.push_back({3, false, 2.0, 15.0,  4, false}); 
-    route.push_back({4, true,  0.0, 15.0, -1, false});
+    // route.push_back({5, false, 2.0, 15.0,  3, false}); 
+    // route.push_back({3, false, 2.0, 15.0,  4, false}); 
+    // route.push_back({4, true,  0.0, 15.0, -1, false});
 
-    // route.push_back({2, false, 2.0, 15.0,  0, false});
-    // route.push_back({0, false, 4.0, 30.0,  1, false});
-    // route.push_back({1, false, 1.5, 15.0,  6, false});
-    // route.push_back({6, false, 4.0, 30.0,  7, false});
-    // route.push_back({7, false, 1.5, 15.0,  0, false});
+    route.push_back({2, false, 2.0, 15.0,  0, false});
+    route.push_back({0, false, 4.0, 30.0,  1, false});
+    route.push_back({1, false, 1.5, 15.0,  6, false});
+    route.push_back({6, false, 4.0, 30.0,  7, false});
+    route.push_back({7, false, 1.5, 15.0,  0, false});
 
     // Test Static Queue
     rteQue.push(1);
@@ -420,7 +420,18 @@ void ArucoFollowerNode::ctrlLoop() {
             if (!rteQue.empty()) {
                 dest_id = rteQue.front();
                 rteQue.pop();
-                RCLCPP_INFO(this->get_logger(), "FIFO Queue element found : ID %d", dest_id);
+                RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", dest_id);
+
+                // Print the remaining queue (temporary clone of the queue)
+                std::queue<int> temp_q = rteQue;
+                std::string temp_qstr = "[ ";
+                while (!temp_q.empty()) {
+                    temp_qstr += std::to_string(temp_q.front()) + " ";
+                    temp_q.pop();
+                }
+                temp_qstr += "]";
+                
+                RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
 
                 // Set the new destination ID
                 setDest(dest_id);
