@@ -433,6 +433,12 @@ void ArucoFollowerNode::ctrlLoop() {
                 
                 RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
 
+                RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
+                for (size_t i = 0; i < route.size(); i++) {
+                    RCLCPP_INFO(this->get_logger(), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d",
+                        i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
+                }
+
                 // Set the new destination ID
                 setDest(dest_id);
                 
@@ -505,13 +511,6 @@ void ArucoFollowerNode::ctrlLoop() {
             if (message.angular.z > SPEED_ANGULAR) message.angular.z = SPEED_ANGULAR;
             if (message.angular.z < -SPEED_ANGULAR) message.angular.z = -SPEED_ANGULAR;
 
-#if DEBUG_COMMENTS
-            const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
-            RCLCPP_INFO(this->get_logger(), 
-                "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
-                state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
-#endif // DEBUG_COMMENTS
-
             break;
         }
 
@@ -526,6 +525,13 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
             
     }
+
+#if DEBUG_COMMENTS
+    const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
+    RCLCPP_INFO(this->get_logger(), 
+        "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
+        state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
+#endif // DEBUG_COMMENTS
     
     cmd_pub_->publish(message);
 }
