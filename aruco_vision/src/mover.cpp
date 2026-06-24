@@ -57,8 +57,8 @@ void MoverNode::moveCallback() {
 #define UNCERTAINTY     30.0
 #define HYSTERESIS      80.0
 #define ANGLE_PARK      0.0
-#define ANGLE_UNCE      0.2
-#define ANGLE_HYST      0.35
+#define ANGLE_UNCE      0.05
+#define ANGLE_HYST      0.10
 
 // Proportional gains
 #define KP_Y            0.00037
@@ -67,7 +67,7 @@ void MoverNode::moveCallback() {
 #define KP_DYN_ANGLE    0.001
 
 // Motor limits
-#define SPEED_LINEAR    0.2
+#define SPEED_LINEAR    0.4
 #define SPEED_ANGULAR   0.4
 
 // Timeout
@@ -90,7 +90,7 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
     
     taxi_sub_ = this->create_subscription<std_msgs::msg::Int32>(
-        "/taxi_command", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));         
+        "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));         
     
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
