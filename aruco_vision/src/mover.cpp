@@ -104,19 +104,19 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     time = this->now();
 
     // --- Route Database Init ---
-    // route.push_back({5, false, 2.0, 15.0,  3, false}); 
-    // route.push_back({3, false, 2.0, 15.0,  4, false}); 
-    // route.push_back({4, true,  0.0, 15.0, -1, false});
+    route.push_back({5, false, 2.0, 15.0,  3, false}); 
+    route.push_back({3, false, 2.0, 15.0,  4, false}); 
+    route.push_back({4, true,  0.0, 15.0, -1, false});
 
-    route.push_back({2, false, 2.0, 15.0,  0, false});
-    route.push_back({0, false, 4.0, 30.0,  1, false});
-    route.push_back({1, false, 1.5, 15.0,  6, false});
-    route.push_back({6, false, 4.0, 30.0,  7, false});
-    route.push_back({7, false, 1.5, 15.0,  0, false});
+    // route.push_back({2, false, 2.0, 15.0,  0, false});
+    // route.push_back({0, false, 4.0, 30.0,  1, false});
+    // route.push_back({1, false, 1.5, 15.0,  6, false});
+    // route.push_back({6, false, 4.0, 30.0,  7, false});
+    // route.push_back({7, false, 1.5, 15.0,  0, false});
 
     // Test Static Queue
-    rteQue.push(1);
-    rteQue.push(0);
+    // rteQue.push(1);
+    // rteQue.push(0);
 
     bool dest_found = false;
     for( size_t i=0; i<route.size(); i++ ){
@@ -372,9 +372,19 @@ void ArucoFollowerNode::ctrlLoop() {
 #endif
 
     // State condition flags
-    bool ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
-    bool ready_to_park = (active_route.is_destination && ((std::abs(error_y) < UNCERTAINTY) && (std::abs(error_angle) < ANGLE_UNCE)));
-    bool robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
+    bool ready_to_move, ready_to_park, robot_drifted;
+
+    if (active_route.is_destination) {
+        // Destinations only evaluate physical straightness (raw_angle) to park
+        ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(raw_angle) > ANGLE_UNCE));
+        ready_to_park = ((std::abs(error_y) < UNCERTAINTY) && (std::abs(raw_angle) < ANGLE_UNCE));
+        robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(raw_angle) > ANGLE_HYST));
+    } else {
+        // Pass-throughs continue to use error_angle and error_x
+        ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
+        ready_to_park = false; 
+        robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_x) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
+    }
 
     switch (rs) {
         case ROBOT_IDLE:
@@ -429,7 +439,7 @@ void ArucoFollowerNode::ctrlLoop() {
 
         case ROBOT_WAIT:
         {
-            int dest_id = 7;
+            int dest_id = 5;
 
             if (robot_drifted) {
                 // Realignment if bumped from its parking position
@@ -553,12 +563,12 @@ void ArucoFollowerNode::ctrlLoop() {
             
     }
 
-#if DEBUG_COMMENTS
+// #if DEBUG_COMMENTS
     const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
     RCLCPP_INFO(this->get_logger(), 
         "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
         state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
-#endif // DEBUG_COMMENTS
+// #endif // DEBUG_COMMENTS
     
     cmd_pub_->publish(message);
 }
