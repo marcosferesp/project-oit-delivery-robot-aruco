@@ -151,16 +151,22 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     }
 #endif // DEBUG_COMMENTS
 
-    rclcpp::QoS latched_qos(rclcpp::KeepLast(1));
-    latched_qos.transient_local();
-    
-    db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", latched_qos);
-    
-    auto db_msg = std_msgs::msg::Int32MultiArray();
-    for (size_t i = 0; i < route.size(); i++) {
-        db_msg.data.push_back(route[i].aruco_id);
-    }
-    db_pub_->publish(db_msg);
+    db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", 10);
+
+    // Listens for the Dispatcher's boolean trigger. If true, it beams the array exactly once.
+    db_list_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "/req_db", 10,
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {
+            if (msg->data == true) {
+                auto db_msg = std_msgs::msg::Int32MultiArray();
+                for (size_t i = 0; i < route.size(); i++) {
+                    db_msg.data.push_back(route[i].aruco_id);
+                }
+                db_pub_->publish(db_msg);
+                RCLCPP_INFO(this->get_logger(), "\033[1;35m[NETWORK] Database requested by Dispatcher. Broadcasted.\033[0m");
+            }
+        }
+    );
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
@@ -485,14 +491,13 @@ void ArucoFollowerNode::ctrlLoop() {
                 }
             } else {
                 if ((now - depart_time).seconds() > DEPARTURE_DELAY) {
-                    int dest_id = 5;
+                    int next_dest = 5; // Default Fallback
 
                     if (!rteQue.empty()) {
-                        dest_id = rteQue.front();
+                        next_dest = rteQue.front();
                         rteQue.pop();
-                        RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", dest_id);
+                        RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", next_dest);
 
-                        // Print the remaining queue (temporary clone of the queue)
                         std::queue<int> temp_q = rteQue;
                         std::string temp_qstr = "[ ";
                         while (!temp_q.empty()) {
@@ -500,24 +505,22 @@ void ArucoFollowerNode::ctrlLoop() {
                             temp_q.pop();
                         }
                         temp_qstr += "]";
-                        
                         RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
-
-                        RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
-                        for (size_t i = 0; i < route.size(); i++) {
-                            RCLCPP_INFO(this->get_logger(), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d",
-                                i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
+                    } else {
+                        // If queue is empty and we are ALREADY at ID 5, stay parked and reset the wait timers
+                        if (target_id == next_dest) {
+                            wait_time = now;
+                            pkg_taken = false;
+                            depart_to = false;
+                            break; 
                         }
-
-                        // Set the new destination ID
-                        setDest(dest_id);
-                        
-                        // Wipe the visited locations booleans
-                        resetRoute();
-
-                        rs = ROBOT_MOVE; 
-                        break;
+                        RCLCPP_INFO(this->get_logger(), "Queue empty. Returning to Fallback (ID %d).", next_dest);
                     }
+
+                    setDest(next_dest);
+                    resetRoute();
+                    rs = ROBOT_MOVE; 
+                    break;
                 }
             }
             break;

@@ -37,36 +37,43 @@ void cmdHelp(const std::string& arg) {
 
 std::vector<int> valid_ids;
 
-void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub, rclcpp::Logger logger) {
-    if (valid_ids.empty()) {
-        std::cout << "\033[1;31m[ERROR] Database empty. Is the Mover node running?\033[0m\n";
-        return;
-    }
-
+void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub, rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr list_pub, rclcpp::Logger logger) {
     if (arg.empty()) {
         std::cout << "\033[1;31m[ERROR] Missing argument. Use 'taxi list' or 'taxi <number>'.\033[0m\n";
         return;
     }
 
     if (arg == "list") {
-        std::cout << "\nAvailable Destinations: [ ";
-        for (int id : valid_ids) { std::cout << id << " "; }
-        std::cout << "]\n";
+        // Send the boolean trigger to the Mover!
+        auto list_msg = std_msgs::msg::Bool();
+        list_msg.data = true;
+        list_pub->publish(list_msg);
+        std::cout << "\033[1;33mRequesting database from Mover...\033[0m\n";
+        return;
+    } 
+    
+    // Safety check: If they try to send a number before the database is synced
+    if (valid_ids.empty()) {
+        std::cout << "\033[1;31m[ERROR] Database empty. Requesting sync. Please wait a second and type your command again.\033[0m\n";
+        auto list_msg = std_msgs::msg::Bool();
+        list_msg.data = true;
+        list_pub->publish(list_msg);
+        return;
+    }
 
-    } else {
-        try {
-            int target_id = std::stoi(arg);
-            if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
-                auto msg = std_msgs::msg::Int32();
-                msg.data = target_id;
-                pub->publish(msg);
-                RCLCPP_INFO(logger, "\033[1;32mDispatched ID %d to the network.\033[0m", target_id);
-            } else {
-                std::cout << "\033[1;31m[ERROR] ID " << target_id << " is not in the active database.\033[0m\n";
-            }
-        } catch (...) {
-            std::cout << "\033[1;31m[ERROR] Invalid argument. Use 'taxi list' or 'taxi <number>'.\033[0m\n";
+    // Normal Dispatch Logic
+    try {
+        int target_id = std::stoi(arg);
+        if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
+            auto msg = std_msgs::msg::Int32();
+            msg.data = target_id;
+            pub->publish(msg);
+            RCLCPP_INFO(logger, "\033[1;32mDispatched ID %d to the network.\033[0m", target_id);
+        } else {
+            std::cout << "\033[1;31m[ERROR] ID " << target_id << " is not in the active database.\033[0m\n";
         }
+    } catch (...) {
+        std::cout << "\033[1;31m[ERROR] Invalid argument. Use 'taxi list' or 'taxi <number>'.\033[0m\n";
     }
 }
 
@@ -97,17 +104,17 @@ int main(int argc, char **argv) {
     auto taxi_pub = node->create_publisher<std_msgs::msg::Int32>("/cmd_taxi", 10);
     auto pkg_pub = node->create_publisher<std_msgs::msg::Bool>("/pkg_status", 10);
     
-    // --- Database Synchronization ---
-    rclcpp::QoS latched_qos(rclcpp::KeepLast(1));
-    latched_qos.transient_local();
-
+    // --- The New Trigger Publisher ---
+    auto db_req_pub = node->create_publisher<std_msgs::msg::Bool>("/req_db", 10);
+    
+    // --- The Network Callback (Prints the list when it arrives) ---
     auto db_sub = node->create_subscription<std_msgs::msg::Int32MultiArray>(
-        "/active_database", latched_qos,
+        "/active_db", 10,
         [](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
             valid_ids = msg->data;
-            std::cout << "\n\033[1;32m[SYSTEM] Synced route database from Mover: [ \033[0m";
-            for (int id : valid_ids) std::cout << "\033[1;32m" << id << " \033[0m";
-            std::cout << "\033[1;32m]\033[0m\n[DISPATCHER] > " << std::flush;
+            std::cout << "\n\033[1;32m[SYSTEM] Available Destinations: [ ";
+            for (int id : valid_ids) std::cout << id << " ";
+            std::cout << "]\033[0m\n[DISPATCHER] > " << std::flush;
         }
     );
 
@@ -165,7 +172,7 @@ int main(int argc, char **argv) {
         if (command == "help") {
             cmdHelp(argument);
         } else if (command == "taxi") {
-            cmdTaxi(argument, taxi_pub, node->get_logger());
+            cmdTaxi(argument, taxi_pub, db_req_pub, node->get_logger());
         } else if (command == "pkg") {
             cmdPkg(argument, pkg_pub);
         } else {

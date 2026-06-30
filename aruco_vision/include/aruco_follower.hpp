@@ -61,6 +61,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr taxi_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pkg_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr db_list_sub_;
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
