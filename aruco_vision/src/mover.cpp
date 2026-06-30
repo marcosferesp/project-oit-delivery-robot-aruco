@@ -73,7 +73,7 @@ void MoverNode::moveCallback() {
 // Timeout
 #define ARUCO_TIMEOUT   1.0
 #define WAIT_TIMEOUT    5.0
-#define PACKAGE_TIMEOUT 300.0
+#define PACKAGE_TIMEOUT 60.0
 #define DEPARTURE_DELAY 10.0
 
 
@@ -111,15 +111,15 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     time = this->now();
 
     // --- Route Database Init ---
-    route.push_back({5, false, 2.0, 15.0,  3, false}); 
-    route.push_back({3, false, 2.0, 15.0,  4, false}); 
-    route.push_back({4, true,  0.0, 15.0, -1, false});
+    // route.push_back({5, false, 2.0, 15.0,  3, false}); 
+    // route.push_back({3, false, 2.0, 15.0,  4, false}); 
+    // route.push_back({4, true,  0.0, 15.0, -1, false});
 
-    // route.push_back({2, false, 2.0, 15.0,  0, false});
-    // route.push_back({0, false, 4.0, 30.0,  1, false});
-    // route.push_back({1, false, 1.5, 15.0,  6, false});
-    // route.push_back({6, false, 4.0, 30.0,  7, false});
-    // route.push_back({7, false, 1.5, 15.0,  0, false});
+    route.push_back({2, false, 2.0, 15.0,  0, false});
+    route.push_back({0, false, 4.0, 30.0,  1, false});
+    route.push_back({1, false, 1.5, 15.0,  6, false});
+    route.push_back({6, false, 4.0, 30.0,  7, false});
+    route.push_back({7, false, 1.5, 15.0,  0, false});
 
     // Test Static Queue
     // rteQue.push(1);
@@ -491,7 +491,7 @@ void ArucoFollowerNode::ctrlLoop() {
                 }
             } else {
                 if ((now - depart_time).seconds() > DEPARTURE_DELAY) {
-                    int next_dest = 5; // Default Fallback
+                    int next_dest = 0; // Default Fallback
 
                     if (!rteQue.empty()) {
                         next_dest = rteQue.front();

@@ -140,6 +140,8 @@ int main(int argc, char **argv) {
         "=========================================\n"
         " Type 'help' for available commands.\n"
         " Waiting for user input...\n");
+
+    rl_catch_signals = 0;
     
     while (rclcpp::ok()) {
         // --- FIX 2 & 3: readline automatically handles ANSI codes, arrow keys, and Ctrl+C crashes ---
