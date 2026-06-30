@@ -73,6 +73,8 @@ void MoverNode::moveCallback() {
 // Timeout
 #define ARUCO_TIMEOUT   1.0
 #define WAIT_TIMEOUT    5.0
+#define PACKAGE_TIMEOUT 300.0
+#define DEPARTURE_DELAY 10.0
 
 
 /* 
@@ -90,7 +92,10 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
     
     taxi_sub_ = this->create_subscription<std_msgs::msg::Int32>(
-        "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));         
+        "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));
+
+    pkg_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "/pkg_status", 10, std::bind(&ArucoFollowerNode::pkgCallback, this, std::placeholders::_1)); 
     
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
@@ -100,6 +105,8 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     target_y = 0.0;
     target_angle = 0.0;
     corner_turn = false;
+    pkg_taken = false;
+    depart_to = false;
 
     time = this->now();
 
@@ -143,6 +150,17 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
             i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
     }
 #endif // DEBUG_COMMENTS
+
+    rclcpp::QoS latched_qos(rclcpp::KeepLast(1));
+    latched_qos.transient_local();
+    
+    db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", latched_qos);
+    
+    auto db_msg = std_msgs::msg::Int32MultiArray();
+    for (size_t i = 0; i < route.size(); i++) {
+        db_msg.data.push_back(route[i].aruco_id);
+    }
+    db_pub_->publish(db_msg);
 
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
@@ -268,6 +286,15 @@ void ArucoFollowerNode::taxiCallback(const std_msgs::msg::Int32::SharedPtr msg) 
     } else {
         RCLCPP_WARN(this->get_logger(), "\033[1;31m[LIVE COMMAND REJECTED] ID %d does not exist in the map.\033[0m", new_id);
     }
+}
+
+/*
+ * Function pkgCallback
+ * Updates the internal boolean when the web server or Dispatcher sends a status.
+ */
+void ArucoFollowerNode::pkgCallback(const std_msgs::msg::Bool::SharedPtr msg) {
+    pkg_taken = msg->data;
+    RCLCPP_INFO(this->get_logger(), "\033[1;35m[NETWORK] Package status updated to: %s\033[0m", pkg_taken ? "TRUE" : "FALSE");
 }
 
 /*
@@ -424,6 +451,8 @@ void ArucoFollowerNode::ctrlLoop() {
             } else {
                 rs = ROBOT_WAIT;
                 wait_time = now;
+                pkg_taken = false;
+                depart_to = false;
             }
             break;
 
@@ -439,51 +468,57 @@ void ArucoFollowerNode::ctrlLoop() {
 
         case ROBOT_WAIT:
         {
-            int dest_id = 5;
-
             if (robot_drifted) {
                 // Realignment if bumped from its parking position
                 rs = ROBOT_MOVE;
                 break;
 
-            } else if ((now - wait_time).seconds() > WAIT_TIMEOUT) {
-                // Timer expired : get back to default position
-                setDest(dest_id);
-                resetRoute();
-                rs = ROBOT_MOVE; 
-                break;
             }
-
-            if (!rteQue.empty()) {
-                dest_id = rteQue.front();
-                rteQue.pop();
-                RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", dest_id);
-
-                // Print the remaining queue (temporary clone of the queue)
-                std::queue<int> temp_q = rteQue;
-                std::string temp_qstr = "[ ";
-                while (!temp_q.empty()) {
-                    temp_qstr += std::to_string(temp_q.front()) + " ";
-                    temp_q.pop();
+            
+            if (!depart_to) {
+                if (pkg_taken) {
+                    depart_to = true;
+                    depart_time = now;
+                } else if ((now - wait_time).seconds() > PACKAGE_TIMEOUT) {
+                    depart_to = true;
+                    depart_time = now;
                 }
-                temp_qstr += "]";
-                
-                RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
+            } else {
+                if ((now - depart_time).seconds() > DEPARTURE_DELAY) {
+                    int dest_id = 5;
 
-                RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
-                for (size_t i = 0; i < route.size(); i++) {
-                    RCLCPP_INFO(this->get_logger(), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d",
-                        i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
+                    if (!rteQue.empty()) {
+                        dest_id = rteQue.front();
+                        rteQue.pop();
+                        RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", dest_id);
+
+                        // Print the remaining queue (temporary clone of the queue)
+                        std::queue<int> temp_q = rteQue;
+                        std::string temp_qstr = "[ ";
+                        while (!temp_q.empty()) {
+                            temp_qstr += std::to_string(temp_q.front()) + " ";
+                            temp_q.pop();
+                        }
+                        temp_qstr += "]";
+                        
+                        RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
+
+                        RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
+                        for (size_t i = 0; i < route.size(); i++) {
+                            RCLCPP_INFO(this->get_logger(), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d",
+                                i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
+                        }
+
+                        // Set the new destination ID
+                        setDest(dest_id);
+                        
+                        // Wipe the visited locations booleans
+                        resetRoute();
+
+                        rs = ROBOT_MOVE; 
+                        break;
+                    }
                 }
-
-                // Set the new destination ID
-                setDest(dest_id);
-                
-                // Wipe the visited locations booleans
-                resetRoute();
-
-                rs = ROBOT_MOVE; 
-                break;
             }
             break;
         }

@@ -14,6 +14,8 @@
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/int32.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/int32_multi_array.hpp"
 
 typedef enum {
     ROBOT_IDLE,
@@ -49,13 +51,16 @@ private:
     // --- Callbacks ---
     void arucoCallback(const geometry_msgs::msg::Quaternion::SharedPtr msg);
     void taxiCallback(const std_msgs::msg::Int32::SharedPtr msg);
+    void pkgCallback(const std_msgs::msg::Bool::SharedPtr msg);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+    rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr db_pub_;
 
     // --- Subscribers ---
     rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr taxi_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pkg_sub_;
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
@@ -67,10 +72,13 @@ private:
     float target_angle;
     int target_id;
     bool corner_turn;
+    bool pkg_taken;
+    bool depart_to;
 
     rclcpp::Time time;
     rclcpp::Time search_start_time;
     rclcpp::Time wait_time;
+    rclcpp::Time depart_time;
 
     // --- Database ---
     std::vector<robot_route_t> route;
