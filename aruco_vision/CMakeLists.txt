@@ -76,6 +76,8 @@ ament_target_dependencies(dispatcher
 # PART 5 : Install everything #####
 ###################################
 
+target_link_libraries(dispatcher readline)
+
 install(TARGETS
   aruco_detector_node
   mover

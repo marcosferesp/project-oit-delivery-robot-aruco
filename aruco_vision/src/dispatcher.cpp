@@ -7,6 +7,9 @@
 #include <vector>
 #include <algorithm>
 #include <sstream>
+#include <thread>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 void cmdHelp(const std::string& arg) {
     if (arg.empty()) {
@@ -108,6 +111,11 @@ int main(int argc, char **argv) {
         }
     );
 
+    // --- FIX 1: Run the ROS 2 node in a background thread so the UI doesn't block the network ---
+    std::thread spin_thread([node]() {
+        rclcpp::spin(node);
+    });
+
     RCLCPP_INFO(node->get_logger(), "\n"
         "=========================================\n"
         " Dynamic Terminal Input Node v1.0\n"
@@ -126,11 +134,25 @@ int main(int argc, char **argv) {
         " Type 'help' for available commands.\n"
         " Waiting for user input...\n");
     
-    std::string line;
     while (rclcpp::ok()) {
-        std::cout << "\n[DISPATCHER] > ";
-        std::getline(std::cin, line);
+        // --- FIX 2 & 3: readline automatically handles ANSI codes, arrow keys, and Ctrl+C crashes ---
+        char* input = readline("\n[DISPATCHER] > ");
         
+        // Safely catch Ctrl+C or Ctrl+D (EOF) to prevent infinite spam
+        if (!input) {
+            std::cout << "\nShutting down Dispatcher...\n";
+            break; 
+        }
+
+        std::string line(input);
+        
+        // Add the typed command to the up-arrow history
+        if (!line.empty()) {
+            add_history(input); 
+        }
+        
+        free(input); // Prevent memory leaks from readline allocation
+
         if (line.empty()) continue;
 
         // Parse user input
@@ -152,5 +174,8 @@ int main(int argc, char **argv) {
     }
 
     rclcpp::shutdown();
+    
+    // Safely collapse the background network thread before exiting
+    spin_thread.join(); 
     return 0;
 }
