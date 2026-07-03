@@ -151,14 +151,6 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
         throw std::runtime_error("Invalid destination ID requested.");
     }
 
-#if DEBUG_COMMENTS
-    RCLCPP_INFO(this->get_logger(), "==== ROUTE DATABASE ====");
-    for (size_t i = 0; i < route.size(); i++) {
-        RCLCPP_INFO(this->get_logger(), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d",
-            i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
-    }
-#endif // DEBUG_COMMENTS
-
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
 }
 
@@ -316,10 +308,7 @@ void ArucoFollowerNode::arucoCallback(const geometry_msgs::msg::Quaternion::Shar
             // It is safe to switch targets if we are not in a corner or if the corner turn is completely finished
             bool safe_switch = (!corner_turn || has_turned);
 
-            RCLCPP_INFO(this->get_logger(), "Next ID %d spotted! y_close: %c | has_turned: %c | safe_switch: %c", 
-                incoming_id, y_close ? 'Y':'N', has_turned ? 'Y':'N', safe_switch ? 'Y':'N');
-
-            if (y_close && safe_switch) {
+           if (y_close && safe_switch) {
                 target_id = incoming_id;
                 accept_marker = true;
             }
@@ -450,15 +439,6 @@ void ArucoFollowerNode::ctrlLoop() {
         active_route = { (uint8_t)target_id, false, 0.0, 5.0, -1, false };
     }
 
-// #if DEBUG_COMMENTS
-//     RCLCPP_INFO(this->get_logger(), "Active Route -> Dest: %c | Timeout: %.1fs | Next ID: %d", 
-//                 active_route.is_destination ? 'Y':'N', active_route.search_timeout, active_route.next_id);
-
-//     RCLCPP_INFO(this->get_logger(), "==== MOVER INPUTS ====");
-//     RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, active_route.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
-//     RCLCPP_INFO(this->get_logger(), "Coords -> X: %.1f | Y: %.1f | Ang: %.4f", target_x, target_y, target_angle);
-// #endif // DEBUG_COMMENTS
-
     // Calculate physical pixel distance between the robot and the target coordinate
     float error_y = y_park - target_y;
     float error_x = x_park - target_x;
@@ -476,12 +456,6 @@ void ArucoFollowerNode::ctrlLoop() {
     // Calculate the difference between where the robot is pointing and where the dynamic wants it to point
     float error_angle = dyn_angle - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
-
-// #if DEBUG_COMMENTS
-//     RCLCPP_INFO(this->get_logger(), "==== MOVER MATH ====");
-//     RCLCPP_INFO(this->get_logger(), "Errors -> ErrX: %.1f | ErrY: %.1f", error_x, error_y);
-//     RCLCPP_INFO(this->get_logger(), "Angles -> raw_ang: %.4f | dyn_x: %.1f | dyn_ang: %.4f | err_ang: %.4f", raw_angle, dyn_x, dyn_angle, error_angle);
-// #endif
 
     // State condition flags
     bool ready_to_move, ready_to_park, robot_drifted;
@@ -651,7 +625,6 @@ void ArucoFollowerNode::ctrlLoop() {
                     // Instantly kill forward movement if angular threshold is too high
                     if (std::abs(raw_angle) > 0.05) {
                         message.linear.x = 0.0;
-                        RCLCPP_INFO(this->get_logger(), "Brake -> abs(raw) = %.4f > 0.05", std::abs(raw_angle));
                     } else {
                         // Uses the raw angle so it only drives fast when pointing perfectly straight
                         angle_brake = std::pow(std::cos(raw_angle), 5.0);
@@ -682,13 +655,6 @@ void ArucoFollowerNode::ctrlLoop() {
             break;
             
     }
-
-// // #if DEBUG_COMMENTS
-//     const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
-//     RCLCPP_INFO(this->get_logger(), 
-//         "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
-//         state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
-// // #endif // DEBUG_COMMENTS
 
     std::string q_str = "";
     if (rteQue.empty()) {
