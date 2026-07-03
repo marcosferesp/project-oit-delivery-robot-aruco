@@ -322,6 +322,14 @@ int main(int argc, char **argv) {
         }
     );
 
+    // Web Server Integration
+    auto mission_sub = node->create_subscription<std_msgs::msg::String>(
+        "/mission", 10,
+        [](const std_msgs::msg::String::SharedPtr msg) {
+            std::cout << "\n[WEB SERVER] Received target ID: " << msg->data << " from HTML interface.\n[DISPATCHER] > " << std::flush;
+        }
+    );
+
     std::thread spin_thread([node]() {
         rclcpp::spin(node);
     });
