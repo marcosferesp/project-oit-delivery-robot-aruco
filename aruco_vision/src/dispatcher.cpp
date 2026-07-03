@@ -2,6 +2,7 @@
 #include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/int32_multi_array.hpp"
+#include "std_msgs/msg/string.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 bool current_pkg_status = false;
 std::string current_robot_pos = "UNKNOWN (Requires Telemetry Node)";
 std::vector<int> valid_ids;
+std::string latest_telemetry = "";
 
 // --- POSIX SIGNAL HANDLER ---
 void sigintHandler(int signum) {
@@ -35,6 +37,7 @@ void cmdHelp(const std::string& arg) {
         std::cout << "  taxi  : Manage destinations\n";
         std::cout << "  pkg   : Manage package status\n";
         std::cout << "  param : Live-tune physics & limits\n";
+        std::cout << "  status: View live robot telemetry\n";
         std::cout << "\n==========================\n";
         std::cout << " Type 'help' <cmd> for more details on a command.\n";
 
@@ -73,6 +76,12 @@ void cmdHelp(const std::string& arg) {
         std::cout << "  waittime : Interruption delay (sec)\n";
         std::cout << "  pkgtime  : Package abandon timeout (sec)\n";
         std::cout << "  depdelay : Safety departure countdown (sec)\n";
+    } else if (arg == "status") {
+    std::cout << "Objective : Displays the live, real-time telemetry from the robot's control loop.\n";
+    std::cout << "  status       : Displays global state and math calculations\n";
+    std::cout << "  status robot : Displays only the physical state and target info\n";
+    std::cout << "  status math  : Displays only the PID errors and angles\n";
+    std::cout << "  status db    : Displays the synchronized route database\n";
     } else {
         std::cout << "\033[1;31m[ERROR] Unknown help argument.\033[0m\n";
     }
@@ -213,6 +222,77 @@ void cmdParam(const std::string& args, std::shared_ptr<rclcpp::AsyncParametersCl
 }
 
 /*
+ * Function cmdStatus
+ * Parses the live telemetry string and formats it based on the requested detail level
+ */
+void cmdStatus(const std::string& arg) {
+    // Intercept the database request immediately (no telemetry required)
+    if (arg == "db") {
+        std::cout << "\n\033[1;32m--- ROUTE DATABASE ---\033[0m\n";
+        if (valid_ids.empty()) {
+            std::cout << "  Database empty. Type 'taxi list' to sync.\n";
+        } else {
+            std::cout << "  Available Destinations: [ ";
+            for (int id : valid_ids) std::cout << id << " ";
+            std::cout << "]\n";
+        }
+        std::cout << "\033[1;32m----------------------\033[0m\n";
+        return;
+    }
+
+    if (latest_telemetry.empty()) {
+        std::cout << "\033[1;31m[ERROR] No telemetry received. Is Mover running?\033[0m\n";
+        return;
+    }
+    
+    // Parse the comma-separated string
+    std::vector<std::string> t;
+    std::stringstream ss(latest_telemetry);
+    std::string token;
+    while (std::getline(ss, token, ',')) t.push_back(token);
+    
+    if (t.size() < 13) return;
+
+    int rs = std::stoi(t[0]);
+    const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
+    std::string c_state = (rs >= 0 && rs <= 4) ? state_str[rs] : "UNKNOWN";
+
+    if (arg.empty()) {
+        // CONDENSED GLOBAL SUMMARY
+        std::cout << "\n\033[1;36m[GLOBAL STATUS]\033[0m " 
+                  << "State: " << c_state 
+                  << " | Target: " << t[1] 
+                  << " | Vis: " << (t[3] == "1" ? "Y" : "N") 
+                  << " | Queue: " << t[11] 
+                  << " | Lin: " << t[9] 
+                  << " | Ang: " << t[10] << "\n";
+    }
+    else if (arg == "robot") {
+        std::cout << "\n\033[1;35m--- ROBOT STATE ---\033[0m\n";
+        std::cout << "  Current State : " << c_state << "\n";
+        std::cout << "  Target ID     : " << t[1] << "\n";
+        std::cout << "  Is Destination: " << (t[2] == "1" ? "TRUE" : "FALSE") << "\n";
+        std::cout << "  ArUco Visible : " << (t[3] == "1" ? "YES" : "NO") << "\n";
+        std::cout << "  Pending Queue : " << t[11] << " destinations\n";
+        std::cout << "  Package Status: " << (t[12] == "1" ? "TAKEN" : "WAITING") << "\n";
+        std::cout << "  Command Vel   : [Lin: " << t[9] << ", Ang: " << t[10] << "]\n";
+        std::cout << "\033[1;35m-------------------\033[0m\n";
+    }
+    else if (arg == "math") {
+        std::cout << "\n\033[1;36m--- MATH & ALIGNMENT ---\033[0m\n";
+        std::cout << "  Error X       : " << t[4] << " px\n";
+        std::cout << "  Error Y       : " << t[5] << " px\n";
+        std::cout << "  Raw Angle     : " << t[6] << " rad\n";
+        std::cout << "  Dynamic Angle : " << t[7] << " rad\n";
+        std::cout << "  Error Angle   : " << t[8] << " rad\n";
+        std::cout << "\033[1;36m------------------------\033[0m\n";
+    }
+    else {
+        std::cout << "\033[1;31m[ERROR] Unknown argument. Use 'status', 'status robot', 'status math', or 'status db'.\033[0m\n";
+    }
+}
+
+/*
  * Main
  */
 int main(int argc, char **argv) {
@@ -241,6 +321,13 @@ int main(int argc, char **argv) {
             std::cout << "]\033[0m\n[DISPATCHER] > " << std::flush;
         }
     );
+
+    auto tel_sub = node->create_subscription<std_msgs::msg::String>(
+    "/telem", 10,
+    [](const std_msgs::msg::String::SharedPtr msg) {
+        latest_telemetry = msg->data;
+    }
+);
 
     // --- FIX 1: Run the ROS 2 node in a background thread so the UI doesn't block the network ---
     std::thread spin_thread([node]() {
@@ -305,6 +392,8 @@ int main(int argc, char **argv) {
             cmdPkg(argument, pkg_pub);
         } else if (command == "param") {
             cmdParam(argument, param_client);
+        } else if (command == "status") {
+            cmdStatus(argument);
         } else {
             std::cout << "\033[1;31m[ERROR] Unknown command. Type 'help' for a list of commands.\033[0m\n";
         }

@@ -65,7 +65,8 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     // --- Publishers ---
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);       // Broadcast velocity commands to the hardware motors
     db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", 10); // Broadcasts the active route database to the Dispatcher terminal
-    
+    telem_pub_ = this->create_publisher<std_msgs::msg::String>("/telem", 10);
+
     // --- Subscribers ---
     aruco_sub_ = this->create_subscription<geometry_msgs::msg::Quaternion>(
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
@@ -432,14 +433,14 @@ void ArucoFollowerNode::ctrlLoop() {
         active_route = { (uint8_t)target_id, false, 0.0, 5.0, -1, false };
     }
 
-#if DEBUG_COMMENTS
-    RCLCPP_INFO(this->get_logger(), "Active Route -> Dest: %c | Timeout: %.1fs | Next ID: %d", 
-                active_route.is_destination ? 'Y':'N', active_route.search_timeout, active_route.next_id);
+// #if DEBUG_COMMENTS
+//     RCLCPP_INFO(this->get_logger(), "Active Route -> Dest: %c | Timeout: %.1fs | Next ID: %d", 
+//                 active_route.is_destination ? 'Y':'N', active_route.search_timeout, active_route.next_id);
 
-    RCLCPP_INFO(this->get_logger(), "==== MOVER INPUTS ====");
-    RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, active_route.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
-    RCLCPP_INFO(this->get_logger(), "Coords -> X: %.1f | Y: %.1f | Ang: %.4f", target_x, target_y, target_angle);
-#endif // DEBUG_COMMENTS
+//     RCLCPP_INFO(this->get_logger(), "==== MOVER INPUTS ====");
+//     RCLCPP_INFO(this->get_logger(), "Target -> ID: %d | is_Dest: %c | Vis: %c", target_id, active_route.is_destination ? 'Y':'N', aruco_visible ? 'Y':'N');
+//     RCLCPP_INFO(this->get_logger(), "Coords -> X: %.1f | Y: %.1f | Ang: %.4f", target_x, target_y, target_angle);
+// #endif // DEBUG_COMMENTS
 
     // Calculate physical pixel distance between the robot and the target coordinate
     float error_y = y_park - target_y;
@@ -459,11 +460,11 @@ void ArucoFollowerNode::ctrlLoop() {
     float error_angle = dyn_angle - target_angle;
     error_angle = atan2(sin(error_angle), cos(error_angle));
 
-#if DEBUG_COMMENTS
-    RCLCPP_INFO(this->get_logger(), "==== MOVER MATH ====");
-    RCLCPP_INFO(this->get_logger(), "Errors -> ErrX: %.1f | ErrY: %.1f", error_x, error_y);
-    RCLCPP_INFO(this->get_logger(), "Angles -> raw_ang: %.4f | dyn_x: %.1f | dyn_ang: %.4f | err_ang: %.4f", raw_angle, dyn_x, dyn_angle, error_angle);
-#endif
+// #if DEBUG_COMMENTS
+//     RCLCPP_INFO(this->get_logger(), "==== MOVER MATH ====");
+//     RCLCPP_INFO(this->get_logger(), "Errors -> ErrX: %.1f | ErrY: %.1f", error_x, error_y);
+//     RCLCPP_INFO(this->get_logger(), "Angles -> raw_ang: %.4f | dyn_x: %.1f | dyn_ang: %.4f | err_ang: %.4f", raw_angle, dyn_x, dyn_angle, error_angle);
+// #endif
 
     // State condition flags
     bool ready_to_move, ready_to_park, robot_drifted;
@@ -665,12 +666,25 @@ void ArucoFollowerNode::ctrlLoop() {
             
     }
 
-// #if DEBUG_COMMENTS
-    const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
-    RCLCPP_INFO(this->get_logger(), 
-        "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
-        state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
-// #endif // DEBUG_COMMENTS
+// // #if DEBUG_COMMENTS
+//     const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
+//     RCLCPP_INFO(this->get_logger(), 
+//         "STATE: %-6s | ID: %2d (Dest:%c) | Vis: %c | ErrX: %5.0f | ErrY: %5.0f | Ang: %5.2f | Lin: %4.2f | AngZ: %5.2f |", 
+//         state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
+// // #endif // DEBUG_COMMENTS
+
+    // Live telemetry broadcast to dispatcher
+    auto tel_msg = std_msgs::msg::String();
+    tel_msg.data = std::to_string(rs) + "," + std::to_string(target_id) + "," + 
+                   (active_route.is_destination ? "1" : "0") + "," + 
+                   (aruco_visible ? "1" : "0") + "," + 
+                   std::to_string(error_x) + "," + std::to_string(error_y) + "," + 
+                   std::to_string(raw_angle) + "," + std::to_string(dyn_angle) + "," + 
+                   std::to_string(error_angle) + "," + 
+                   std::to_string(message.linear.x) + "," + std::to_string(message.angular.z) + "," +
+                   std::to_string(rteQue.size()) + "," +
+                   (pkg_taken ? "1" : "0");
+    telem_pub_->publish(tel_msg);
     
     cmd_pub_->publish(message);
 }
