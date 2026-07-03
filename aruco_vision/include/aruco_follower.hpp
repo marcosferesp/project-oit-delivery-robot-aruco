@@ -16,6 +16,7 @@
 #include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/int32_multi_array.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 typedef enum {
     ROBOT_IDLE,
@@ -47,11 +48,13 @@ private:
     void ctrlLoop();
     void resetRoute();
     void setDest(int16_t dest_id);
+    void declareParameters();
 
     // --- Callbacks ---
     void arucoCallback(const geometry_msgs::msg::Quaternion::SharedPtr msg);
     void taxiCallback(const std_msgs::msg::Int32::SharedPtr msg);
     void pkgCallback(const std_msgs::msg::Bool::SharedPtr msg);
+    rcl_interfaces::msg::SetParametersResult paramCallback(const std::vector<rclcpp::Parameter> &parameters);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
@@ -65,6 +68,15 @@ private:
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
+
+    // --- Dynamic Parameters ---
+    double x_park, y_park, uncertainty, hysteresis;
+    double angle_park, angle_unce, angle_hyst;
+    double kp_y, kp_x, kp_err_angle, kp_dyn_angle;
+    double speed_linear, speed_angular;
+    double aruco_timeout, wait_timeout, package_timeout, departure_delay;
+    
+    OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
     // --- Variables ---
     robot_state_t rs;

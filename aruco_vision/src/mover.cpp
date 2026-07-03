@@ -14,8 +14,7 @@
 using namespace std::chrono_literals;
 
 // #define DEBUG_SIMPLE_MOVE_PUB
-#define DEBUG_COMMENTS 1
-
+// #define DEBUG_COMMENTS 1
 
 #if DEBUG_SIMPLE_MOVE_PUB
 /* 
@@ -51,32 +50,6 @@ void MoverNode::moveCallback() {
 #endif // DEBUG_SIMPLE_MOVE_PUB
 
 
-// Parking targets & tolerances
-#define X_PARK          960.0
-#define Y_PARK          540.0
-#define UNCERTAINTY     30.0
-#define HYSTERESIS      80.0
-#define ANGLE_PARK      0.0
-#define ANGLE_UNCE      0.05
-#define ANGLE_HYST      0.10
-
-// Proportional gains
-#define KP_Y            0.00037
-#define KP_X            0.00021
-#define KP_ERR_ANGLE    0.127
-#define KP_DYN_ANGLE    0.001
-
-// Motor limits
-#define SPEED_LINEAR    0.4
-#define SPEED_ANGULAR   0.4
-
-// Timeout
-#define ARUCO_TIMEOUT   1.0
-#define WAIT_TIMEOUT    5.0
-#define PACKAGE_TIMEOUT 60.0
-#define DEPARTURE_DELAY 10.0
-
-
 /* 
  * Constructor ArucoFollowerNode
  * Initializes network connections and injects the route sequences into memory
@@ -84,18 +57,35 @@ void MoverNode::moveCallback() {
  * Output :
  */
 ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_node"), rs(ROBOT_IDLE) {
-    // --- Publisher ---
-    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);   // Broadcast velocity commands to the hardware motors
+    // --- Parameters ---
+    declareParameters();
+    param_callback_handle_ = this->add_on_set_parameters_callback(
+        std::bind(&ArucoFollowerNode::paramCallback, this, std::placeholders::_1));
+
+    // --- Publishers ---
+    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);       // Broadcast velocity commands to the hardware motors
+    db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", 10); // Broadcasts the active route database to the Dispatcher terminal
     
-    // --- Subscriber ---
+    // --- Subscribers ---
     aruco_sub_ = this->create_subscription<geometry_msgs::msg::Quaternion>(
         "/aruco_coordinates", 10, std::bind(&ArucoFollowerNode::arucoCallback, this, std::placeholders::_1));   // Unified topic: x, y, z(angle), and w(ID) synchronized
-    
     taxi_sub_ = this->create_subscription<std_msgs::msg::Int32>(
-        "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));
-
+        "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));             // Listens for destination commands from the Dispatcher
     pkg_sub_ = this->create_subscription<std_msgs::msg::Bool>(
-        "/pkg_status", 10, std::bind(&ArucoFollowerNode::pkgCallback, this, std::placeholders::_1)); 
+        "/pkg_status", 10, std::bind(&ArucoFollowerNode::pkgCallback, this, std::placeholders::_1));            // Listens for package retrieval signals
+    db_list_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "/req_db", 10,
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {                                                      // Listens for the Dispatcher's boolean trigger. If true, it beams the array exactly once.
+            if (msg->data == true) {
+                auto db_msg = std_msgs::msg::Int32MultiArray();
+                for (size_t i = 0; i < route.size(); i++) {
+                    db_msg.data.push_back(route[i].aruco_id);
+                }
+                db_pub_->publish(db_msg);
+                RCLCPP_INFO(this->get_logger(), "\033[1;35m[NETWORK] Database requested by Dispatcher. Broadcasted.\033[0m");
+            }
+        }
+    );
     
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
@@ -151,24 +141,95 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     }
 #endif // DEBUG_COMMENTS
 
-    db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", 10);
-
-    // Listens for the Dispatcher's boolean trigger. If true, it beams the array exactly once.
-    db_list_sub_ = this->create_subscription<std_msgs::msg::Bool>(
-        "/req_db", 10,
-        [this](const std_msgs::msg::Bool::SharedPtr msg) {
-            if (msg->data == true) {
-                auto db_msg = std_msgs::msg::Int32MultiArray();
-                for (size_t i = 0; i < route.size(); i++) {
-                    db_msg.data.push_back(route[i].aruco_id);
-                }
-                db_pub_->publish(db_msg);
-                RCLCPP_INFO(this->get_logger(), "\033[1;35m[NETWORK] Database requested by Dispatcher. Broadcasted.\033[0m");
-            }
-        }
-    );
-
     RCLCPP_INFO(this->get_logger(), "Motor Ctrl is online and preparing to follow ArUco nearby...");
+}
+
+/* 
+ * Function declareParameters
+ * Initializes all physical and mathematical tolerances on the ROS 2 Parameter Server
+ * Inputs :
+ * Output :
+ */
+void ArucoFollowerNode::declareParameters() {
+    // Parking targets & tolerances
+    this->declare_parameter("xpark", 960.0);
+    this->declare_parameter("ypark", 540.0);
+    this->declare_parameter("unce", 30.0);
+    this->declare_parameter("hyst", 80.0);
+    this->declare_parameter("angpark", 0.0);
+    this->declare_parameter("angunce", 0.05);
+    this->declare_parameter("anghyst", 0.10);
+    
+    // Proportional gains
+    this->declare_parameter("kpy", 0.00037);
+    this->declare_parameter("kpx", 0.00021);
+    this->declare_parameter("kperrang", 0.127);
+    this->declare_parameter("kpdynang", 0.001);
+    
+    // Motor limits
+    this->declare_parameter("splin", 0.4);
+    this->declare_parameter("spang", 0.4);
+    
+    // Timeouts
+    this->declare_parameter("arutime", 1.0);
+    this->declare_parameter("waittime", 5.0);
+    this->declare_parameter("pkgtime", 60.0);
+    this->declare_parameter("depdelay", 10.0);
+
+    // Initial load into memory
+    x_park = this->get_parameter("xpark").as_double();
+    y_park = this->get_parameter("ypark").as_double();
+    uncertainty = this->get_parameter("unce").as_double();
+    hysteresis = this->get_parameter("hyst").as_double();
+    angle_park = this->get_parameter("angpark").as_double();
+    angle_unce = this->get_parameter("angunce").as_double();
+    angle_hyst = this->get_parameter("anghyst").as_double();
+    kp_y = this->get_parameter("kpy").as_double();
+    kp_x = this->get_parameter("kpx").as_double();
+    kp_err_angle = this->get_parameter("kperrang").as_double();
+    kp_dyn_angle = this->get_parameter("kpdynang").as_double();
+    speed_linear = this->get_parameter("splin").as_double();
+    speed_angular = this->get_parameter("spang").as_double();
+    aruco_timeout = this->get_parameter("arutime").as_double();
+    wait_timeout = this->get_parameter("waittime").as_double();
+    package_timeout = this->get_parameter("pkgtime").as_double();
+    departure_delay = this->get_parameter("depdelay").as_double();
+}
+
+/* 
+ * Function paramCallback
+ * Intercepts network commands to update internal math variables instantly
+ * Inputs : parameters (std::vector<rclcpp::Parameter>) : The array of incoming edits
+ * Output : result (rcl_interfaces::msg::SetParametersResult) : Success confirmation
+ */
+rcl_interfaces::msg::SetParametersResult ArucoFollowerNode::paramCallback(const std::vector<rclcpp::Parameter> &parameters) {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true; // Default confirmation response
+    result.reason = "Success";
+
+    // Parse incoming parameters and update active variables
+    for (const auto &param : parameters) {
+        if (param.get_name() == "xpark") x_park = param.as_double();
+        else if (param.get_name() == "ypark") y_park = param.as_double();
+        else if (param.get_name() == "unce") uncertainty = param.as_double();
+        else if (param.get_name() == "hyst") hysteresis = param.as_double();
+        else if (param.get_name() == "angpark") angle_park = param.as_double();
+        else if (param.get_name() == "angunce") angle_unce = param.as_double();
+        else if (param.get_name() == "anghyst") angle_hyst = param.as_double();
+        else if (param.get_name() == "kpy") kp_y = param.as_double();
+        else if (param.get_name() == "kpx") kp_x = param.as_double();
+        else if (param.get_name() == "kperrang") kp_err_angle = param.as_double();
+        else if (param.get_name() == "kpdynang") kp_dyn_angle = param.as_double();
+        else if (param.get_name() == "splin") speed_linear = param.as_double();
+        else if (param.get_name() == "spang") speed_angular = param.as_double();
+        else if (param.get_name() == "arutime") aruco_timeout = param.as_double();
+        else if (param.get_name() == "waittime") wait_timeout = param.as_double();
+        else if (param.get_name() == "pkgtime") package_timeout = param.as_double();
+        else if (param.get_name() == "depdelay") departure_delay = param.as_double();
+        
+        RCLCPP_INFO(this->get_logger(), "\033[1;36m[SYS] Parameter '%s' updated to: %f\033[0m", param.get_name().c_str(), param.as_double());
+    }
+    return result;
 }
 
 /*
@@ -227,10 +288,10 @@ void ArucoFollowerNode::arucoCallback(const geometry_msgs::msg::Quaternion::Shar
         // Accept the next destination if it appears before the current one disappears under some conditions
         else if (incoming_id == expected_next) {
             // Do not accept the next marker unless we have physically arrived at the current one
-            bool y_close = (std::abs(Y_PARK - target_y) < 80.0);
+            bool y_close = (std::abs(y_park - target_y) < 80.0);
             
             // The robot has to finish pivoting
-            float cra = ANGLE_PARK - target_angle;
+            float cra = angle_park - target_angle;
             cra = atan2(sin(cra), cos(cra));
             bool has_turned = (std::abs(cra) < 0.05);
             
@@ -351,7 +412,7 @@ void ArucoFollowerNode::ctrlLoop() {
     auto now = this->now();
 
     // If 1 second passes with no new data we lost the marker
-    bool aruco_visible = ((target_id != -1) && ((now - time).seconds() < ARUCO_TIMEOUT));
+    bool aruco_visible = ((target_id != -1) && ((now - time).seconds() < aruco_timeout));
 
     // Database polling
     robot_route_t active_route;
@@ -381,18 +442,18 @@ void ArucoFollowerNode::ctrlLoop() {
 #endif // DEBUG_COMMENTS
 
     // Calculate physical pixel distance between the robot and the target coordinate
-    float error_y = Y_PARK - target_y;
-    float error_x = X_PARK - target_x;
+    float error_y = y_park - target_y;
+    float error_x = x_park - target_x;
 
     // Calculate pure physical alignment to the ArUco marker
-    float raw_angle = ANGLE_PARK - target_angle;
+    float raw_angle = angle_park - target_angle;
     raw_angle = atan2(sin(raw_angle), cos(raw_angle));
 
     // Isolate X-correction math purely to destination parking maneuvers
     float dyn_x = (!active_route.is_destination) ? 0.0 : error_x;
 
     // Generate an optimal curve angle to merge back to the center line
-    float dyn_angle = ANGLE_PARK - atan(KP_DYN_ANGLE*dyn_x);
+    float dyn_angle = angle_park - atan(kp_dyn_angle*dyn_x);
 
     // Calculate the difference between where the robot is pointing and where the dynamic wants it to point
     float error_angle = dyn_angle - target_angle;
@@ -409,14 +470,14 @@ void ArucoFollowerNode::ctrlLoop() {
 
     if (active_route.is_destination) {
         // Destinations only evaluate physical straightness (raw_angle) to park
-        ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(raw_angle) > ANGLE_UNCE));
-        ready_to_park = ((std::abs(error_y) < UNCERTAINTY) && (std::abs(raw_angle) < ANGLE_UNCE));
-        robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(raw_angle) > ANGLE_HYST));
+        ready_to_move = ((std::abs(error_y) > uncertainty) || (std::abs(raw_angle) > angle_unce));
+        ready_to_park = ((std::abs(error_y) < uncertainty) && (std::abs(raw_angle) < angle_unce));
+        robot_drifted = ((std::abs(error_y) > hysteresis) || (std::abs(raw_angle) > angle_hyst));
     } else {
         // Pass-throughs continue to use error_angle and error_x
-        ready_to_move = ((std::abs(error_y) > UNCERTAINTY) || (std::abs(error_x) > UNCERTAINTY) || (std::abs(error_angle) > ANGLE_UNCE));
+        ready_to_move = ((std::abs(error_y) > uncertainty) || (std::abs(error_x) > uncertainty) || (std::abs(error_angle) > angle_unce));
         ready_to_park = false; 
-        robot_drifted = ((std::abs(error_y) > HYSTERESIS) || (std::abs(error_x) > HYSTERESIS) || (std::abs(error_angle) > ANGLE_HYST));
+        robot_drifted = ((std::abs(error_y) > hysteresis) || (std::abs(error_x) > hysteresis) || (std::abs(error_angle) > angle_hyst));
     }
 
     switch (rs) {
@@ -478,19 +539,18 @@ void ArucoFollowerNode::ctrlLoop() {
                 // Realignment if bumped from its parking position
                 rs = ROBOT_MOVE;
                 break;
-
             }
             
             if (!depart_to) {
                 if (pkg_taken) {
                     depart_to = true;
                     depart_time = now;
-                } else if ((now - wait_time).seconds() > PACKAGE_TIMEOUT) {
+                } else if ((now - wait_time).seconds() > package_timeout) {
                     depart_to = true;
                     depart_time = now;
                 }
             } else {
-                if ((now - depart_time).seconds() > DEPARTURE_DELAY) {
+                if ((now - depart_time).seconds() > departure_delay) {
                     int next_dest = 0; // Default Fallback
 
                     if (!rteQue.empty()) {
@@ -498,6 +558,7 @@ void ArucoFollowerNode::ctrlLoop() {
                         rteQue.pop();
                         RCLCPP_INFO(this->get_logger(), "\033[1;36mFIFO Queue element found : ID %d\033[0m", next_dest);
 
+                        // Print the remaining queue (temporary clone of the queue)
                         std::queue<int> temp_q = rteQue;
                         std::string temp_qstr = "[ ";
                         while (!temp_q.empty()) {
@@ -507,7 +568,7 @@ void ArucoFollowerNode::ctrlLoop() {
                         temp_qstr += "]";
                         RCLCPP_INFO(this->get_logger(), "\033[1;36mRemaining in Queue: %s\033[0m", temp_qstr.c_str());
                     } else {
-                        // If queue is empty and we are ALREADY at ID 5, stay parked and reset the wait timers
+                        // If queue is empty and we are ALREADY at fallback, stay parked and reset the wait timers
                         if (target_id == next_dest) {
                             wait_time = now;
                             pkg_taken = false;
@@ -517,8 +578,11 @@ void ArucoFollowerNode::ctrlLoop() {
                         RCLCPP_INFO(this->get_logger(), "Queue empty. Returning to Fallback (ID %d).", next_dest);
                     }
 
+                    // Set the new destination ID
                     setDest(next_dest);
+                    // Wipe the visited locations booleans
                     resetRoute();
+                    
                     rs = ROBOT_MOVE; 
                     break;
                 }
@@ -541,14 +605,14 @@ void ArucoFollowerNode::ctrlLoop() {
         {
             if (active_route.is_destination) {  // Destination
                 // Drive forward proportionally to the Y-error
-                message.linear.x = KP_Y * error_y;
+                message.linear.x = kp_y * error_y;
 
-                if( std::abs(error_y) <= UNCERTAINTY ){
+                if( std::abs(error_y) <= uncertainty ){
                     // If extremely close to parking spot, force wheels straight
-                    message.angular.z = -(KP_ERR_ANGLE * raw_angle);
+                    message.angular.z = -(kp_err_angle * raw_angle);
                 }else{
                     // If driving toward spot, steer using the dynamic curve
-                    message.angular.z = -(KP_ERR_ANGLE * error_angle);
+                    message.angular.z = -(kp_err_angle * error_angle);
                 }
             } else {    // Pass-through
                 if (std::abs(error_y) < 80) {
@@ -558,13 +622,13 @@ void ArucoFollowerNode::ctrlLoop() {
                     // We advance to correct Y coordinate as much possible before aligning
                     message.angular.z = 0.0;
                     if (error_y > 0.0) {
-                        message.linear.x = SPEED_LINEAR;   // Marker is ahead
+                        message.linear.x = speed_linear;   // Marker is ahead
                     } else {
-                        message.linear.x = -SPEED_LINEAR;  // Marker is behind
+                        message.linear.x = -speed_linear;  // Marker is behind
                     }
                 } else {
                     // Uses raw_angle explicitly because we only care about being parallel to the hallway
-                    message.angular.z = -(KP_ERR_ANGLE * raw_angle);
+                    message.angular.z = -(kp_err_angle * raw_angle);
 
                     // Instantly kill forward movement if angular threshold is too high
                     if (std::abs(raw_angle) > 0.05) {
@@ -575,23 +639,23 @@ void ArucoFollowerNode::ctrlLoop() {
                         angle_brake = std::pow(std::cos(raw_angle), 5.0);
                         // Slows down the forward speed by up to 70% if the robot is far off-center
                         x_brake = std::max(0.3f, 1.0f - (std::abs(error_x) / 500.0f));
-                        message.linear.x = SPEED_LINEAR * std::max(0.0f, angle_brake) * x_brake;
+                        message.linear.x = speed_linear * std::max(0.0f, angle_brake) * x_brake;
                     }
                 }
             }
             
             // Exceeding physical robot capabilities
-            if (message.linear.x > SPEED_LINEAR) message.linear.x = SPEED_LINEAR;
-            if (message.linear.x < -SPEED_LINEAR) message.linear.x = -SPEED_LINEAR;
-            if (message.angular.z > SPEED_ANGULAR) message.angular.z = SPEED_ANGULAR;
-            if (message.angular.z < -SPEED_ANGULAR) message.angular.z = -SPEED_ANGULAR;
+            if (message.linear.x > speed_linear) message.linear.x = speed_linear;
+            if (message.linear.x < -speed_linear) message.linear.x = -speed_linear;
+            if (message.angular.z > speed_angular) message.angular.z = speed_angular;
+            if (message.angular.z < -speed_angular) message.angular.z = -speed_angular;
 
             break;
         }
 
         case ROBOT_SEARCH:
         {
-            message.linear.x = SPEED_LINEAR;
+            message.linear.x = speed_linear;
             message.angular.z = 0.0;
             break;
         }
