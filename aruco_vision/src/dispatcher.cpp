@@ -19,12 +19,13 @@ bool current_pkg_status = false;
 std::string current_robot_pos = "UNKNOWN (Requires Telemetry Node)";
 std::vector<int> valid_ids;
 std::string latest_telemetry = "";
+std::string latest_db_str = "";
 
 // --- POSIX SIGNAL HANDLER ---
 void sigintHandler(int signum) {
     std::cout << "\n\033[1;33m[SYSTEM] Shutting down Dispatcher...\033[0m\n";
     rclcpp::shutdown();
-    exit(signum); // Brutally forces the OS to reclaim the frozen readline thread
+    exit(signum); 
 }
 
 /*
@@ -54,8 +55,8 @@ void cmdHelp(const std::string& arg) {
 
     } else if (arg == "param") {
         std::cout << "Objective : Edit the robot's physical variables live without recompiling.\n";
-        std::cout << "Usage     : param <name> <value>\n";
-        std::cout << "          : param list (Shows current values)\n\n";
+        std::cout << " param <name> <value> : Sets the parameter to the value\n";
+        std::cout << " param list           : Shows current values\n\n";
         std::cout << "--- POSITION & TOLERANCE ---\n";
         std::cout << "  xpark    : X center line (px)\n";
         std::cout << "  ypark    : Y parking depth (px)\n";
@@ -77,11 +78,12 @@ void cmdHelp(const std::string& arg) {
         std::cout << "  pkgtime  : Package abandon timeout (sec)\n";
         std::cout << "  depdelay : Safety departure countdown (sec)\n";
     } else if (arg == "status") {
-    std::cout << "Objective : Displays the live, real-time telemetry from the robot's control loop.\n";
-    std::cout << "  status       : Displays global state and math calculations\n";
-    std::cout << "  status robot : Displays only the physical state and target info\n";
-    std::cout << "  status math  : Displays only the PID errors and angles\n";
-    std::cout << "  status db    : Displays the synchronized route database\n";
+        std::cout << "Objective : Displays the live, real-time telemetry from the robot's control loop.\n";
+        std::cout << "  status       : Displays global state and math calculations\n";
+        std::cout << "  status robot : Displays only the physical state and target info\n";
+        std::cout << "  status math  : Displays only the PID errors and angles\n";
+        std::cout << "  status db    : Displays the fully formatted route database\n";
+        std::cout << "  status queue : Displays the current destinations waiting in the FIFO queue\n";
     } else {
         std::cout << "\033[1;31m[ERROR] Unknown help argument.\033[0m\n";
     }
@@ -98,15 +100,13 @@ void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::Sh
     }
 
     if (arg == "list") {
-        // Send the boolean trigger to the Mover!
         auto list_msg = std_msgs::msg::Bool();
         list_msg.data = true;
         list_pub->publish(list_msg);
-        std::cout << "\033[1;33mRequesting database from Mover...\033[0m\n";
+        std::cout << "Requesting database from Mover...\n";
         return;
     } 
     
-    // Safety check: If they try to send a number before the database is synced
     if (valid_ids.empty()) {
         std::cout << "\033[1;31m[ERROR] Database empty. Requesting sync. Please wait a second and type your command again.\033[0m\n";
         auto list_msg = std_msgs::msg::Bool();
@@ -115,14 +115,13 @@ void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::Sh
         return;
     }
 
-    // Normal Dispatch Logic
     try {
         int target_id = std::stoi(arg);
         if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
             auto msg = std_msgs::msg::Int32();
             msg.data = target_id;
             pub->publish(msg);
-            RCLCPP_INFO(logger, "\033[1;32mDispatched ID %d to the network.\033[0m", target_id);
+            RCLCPP_INFO(logger, "Dispatched ID %d to the network.", target_id);
         } else {
             std::cout << "\033[1;31m[ERROR] ID " << target_id << " is not in the active database.\033[0m\n";
         }
@@ -137,7 +136,6 @@ void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::Sh
  */
 void cmdPkg(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub) {
     if (arg == "true" || arg == "false") {
-        // Update local status and push to network
         current_pkg_status = (arg == "true");
         auto msg = std_msgs::msg::Bool();
         msg.data = current_pkg_status;
@@ -159,18 +157,15 @@ void cmdPkg(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Bool>::Shar
  * or fetches the current values from the ROS 2 parameter server.
  */
 void cmdParam(const std::string& args, std::shared_ptr<rclcpp::AsyncParametersClient> param_client) {
-    // Verify arguments exist
     if (args.empty()) {
         std::cout << "\033[1;31m[ERROR] Missing arguments. Use 'param list' or 'param <name> <value>'.\033[0m\n";
         return;
     }
 
-    // Parse the argument string into name and value
     std::istringstream iss(args);
     std::string p_name;
     iss >> p_name;
 
-    // --- NEW: List all current parameters ---
     if (p_name == "list") {
         std::vector<std::string> param_names = {
             "xpark", "ypark", "unce", "hyst", 
@@ -180,29 +175,25 @@ void cmdParam(const std::string& args, std::shared_ptr<rclcpp::AsyncParametersCl
             "arutime", "waittime", "pkgtime", "depdelay"
         };
         
-        // Request the values from the network asynchronously
         auto future_result = param_client->get_parameters(param_names);
         
-        // Wait up to 2 seconds for the robot to respond before timing out
         if (future_result.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
             std::cout << "\033[1;31m[ERROR] Timeout waiting for Mover node. Is it running?\033[0m\n";
             return;
         }
 
         auto result = future_result.get();
-        std::cout << "\n\033[1;36m--- CURRENT PARAMETER VALUES ---\033[0m\n";
+        std::cout << "\n--- CURRENT PARAMETER VALUES ---\n";
         for (const auto& param : result) {
             std::cout << "  " << param.get_name();
-            // Pad the string to neatly align the colons in the terminal
             int pad = 10 - param.get_name().length();
             if (pad > 0) std::cout << std::string(pad, ' ');
             std::cout << " : " << param.as_double() << "\n";
         }
-        std::cout << "\033[1;36m--------------------------------\033[0m\n";
+        std::cout << "--------------------------------\n";
         return;
     }
 
-    // --- Default: Set a new parameter ---
     std::string p_val_str;
     iss >> p_val_str;
 
@@ -213,9 +204,8 @@ void cmdParam(const std::string& args, std::shared_ptr<rclcpp::AsyncParametersCl
 
     try {
         double p_val = std::stod(p_val_str);
-        // Inject parameter onto the ROS 2 parameter server
         param_client->set_parameters({rclcpp::Parameter(p_name, p_val)});
-        std::cout << "\033[1;32m[SYSTEM] Network request sent to update '" << p_name << "' to " << p_val << ".\033[0m\n";
+        std::cout << "[SYSTEM] Network request sent to update '" << p_name << "' to " << p_val << ".\n";
     } catch (...) {
         std::cout << "\033[1;31m[ERROR] Value must be a number.\033[0m\n";
     }
@@ -226,17 +216,14 @@ void cmdParam(const std::string& args, std::shared_ptr<rclcpp::AsyncParametersCl
  * Parses the live telemetry string and formats it based on the requested detail level
  */
 void cmdStatus(const std::string& arg) {
-    // Intercept the database request immediately (no telemetry required)
     if (arg == "db") {
-        std::cout << "\n\033[1;32m--- ROUTE DATABASE ---\033[0m\n";
-        if (valid_ids.empty()) {
+        std::cout << "\n--- ROUTE DATABASE ---\n";
+        if (latest_db_str.empty()) {
             std::cout << "  Database empty. Type 'taxi list' to sync.\n";
         } else {
-            std::cout << "  Available Destinations: [ ";
-            for (int id : valid_ids) std::cout << id << " ";
-            std::cout << "]\n";
+            std::cout << latest_db_str;
         }
-        std::cout << "\033[1;32m----------------------\033[0m\n";
+        std::cout << "----------------------\n";
         return;
     }
 
@@ -245,21 +232,19 @@ void cmdStatus(const std::string& arg) {
         return;
     }
     
-    // Parse the comma-separated string
     std::vector<std::string> t;
     std::stringstream ss(latest_telemetry);
     std::string token;
     while (std::getline(ss, token, ',')) t.push_back(token);
     
-    if (t.size() < 13) return;
+    if (t.size() < 14) return;
 
     int rs = std::stoi(t[0]);
     const char* state_str[] = {"IDLE", "MOVE", "PARK", "SEARCH", "WAIT"};
     std::string c_state = (rs >= 0 && rs <= 4) ? state_str[rs] : "UNKNOWN";
 
     if (arg.empty()) {
-        // CONDENSED GLOBAL SUMMARY
-        std::cout << "\n\033[1;36m[GLOBAL STATUS]\033[0m " 
+        std::cout << "\n[GLOBAL STATUS] " 
                   << "State: " << c_state 
                   << " | Target: " << t[1] 
                   << " | Vis: " << (t[3] == "1" ? "Y" : "N") 
@@ -268,7 +253,7 @@ void cmdStatus(const std::string& arg) {
                   << " | Ang: " << t[10] << "\n";
     }
     else if (arg == "robot") {
-        std::cout << "\n\033[1;35m--- ROBOT STATE ---\033[0m\n";
+        std::cout << "\n--- ROBOT STATE ---\n";
         std::cout << "  Current State : " << c_state << "\n";
         std::cout << "  Target ID     : " << t[1] << "\n";
         std::cout << "  Is Destination: " << (t[2] == "1" ? "TRUE" : "FALSE") << "\n";
@@ -276,19 +261,24 @@ void cmdStatus(const std::string& arg) {
         std::cout << "  Pending Queue : " << t[11] << " destinations\n";
         std::cout << "  Package Status: " << (t[12] == "1" ? "TAKEN" : "WAITING") << "\n";
         std::cout << "  Command Vel   : [Lin: " << t[9] << ", Ang: " << t[10] << "]\n";
-        std::cout << "\033[1;35m-------------------\033[0m\n";
+        std::cout << "-------------------\n";
     }
     else if (arg == "math") {
-        std::cout << "\n\033[1;36m--- MATH & ALIGNMENT ---\033[0m\n";
+        std::cout << "\n--- MATH & ALIGNMENT ---\n";
         std::cout << "  Error X       : " << t[4] << " px\n";
         std::cout << "  Error Y       : " << t[5] << " px\n";
         std::cout << "  Raw Angle     : " << t[6] << " rad\n";
         std::cout << "  Dynamic Angle : " << t[7] << " rad\n";
         std::cout << "  Error Angle   : " << t[8] << " rad\n";
-        std::cout << "\033[1;36m------------------------\033[0m\n";
+        std::cout << "------------------------\n";
+    }
+    else if (arg == "queue") {
+        std::cout << "\n--- PENDING QUEUE ---\n";
+        std::cout << "  " << t[13] << "\n";
+        std::cout << "---------------------\n";
     }
     else {
-        std::cout << "\033[1;31m[ERROR] Unknown argument. Use 'status', 'status robot', 'status math', or 'status db'.\033[0m\n";
+        std::cout << "\033[1;31m[ERROR] Unknown argument. Use 'status', 'status robot', 'status math', 'status db', or 'status queue'.\033[0m\n";
     }
 }
 
@@ -304,32 +294,34 @@ int main(int argc, char **argv) {
     
     auto taxi_pub = node->create_publisher<std_msgs::msg::Int32>("/cmd_taxi", 10);
     auto pkg_pub = node->create_publisher<std_msgs::msg::Bool>("/pkg_status", 10);
-    
-    // --- The New Trigger Publisher ---
     auto db_req_pub = node->create_publisher<std_msgs::msg::Bool>("/req_db", 10);
     
-    // Asynchronous Param editor referencing the exact node name declared in mover.cpp
     auto param_client = std::make_shared<rclcpp::AsyncParametersClient>(node, "aruco_follower_node");
     
-    // --- The Network Callback (Prints the list when it arrives) ---
     auto db_sub = node->create_subscription<std_msgs::msg::Int32MultiArray>(
         "/active_db", 10,
         [](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
             valid_ids = msg->data;
-            std::cout << "\n\033[1;32m[SYSTEM] Available Destinations: [ ";
+            std::cout << "\n[SYSTEM] Available Destinations: [ ";
             for (int id : valid_ids) std::cout << id << " ";
-            std::cout << "]\033[0m\n[DISPATCHER] > " << std::flush;
+            std::cout << "]\n[DISPATCHER] > " << std::flush;
+        }
+    );
+
+    auto db_str_sub = node->create_subscription<std_msgs::msg::String>(
+        "/active_db_str", 10,
+        [](const std_msgs::msg::String::SharedPtr msg) {
+            latest_db_str = msg->data;
         }
     );
 
     auto tel_sub = node->create_subscription<std_msgs::msg::String>(
-    "/telem", 10,
-    [](const std_msgs::msg::String::SharedPtr msg) {
-        latest_telemetry = msg->data;
-    }
-);
+        "/telem", 10,
+        [](const std_msgs::msg::String::SharedPtr msg) {
+            latest_telemetry = msg->data;
+        }
+    );
 
-    // --- FIX 1: Run the ROS 2 node in a background thread so the UI doesn't block the network ---
     std::thread spin_thread([node]() {
         rclcpp::spin(node);
     });
@@ -355,35 +347,28 @@ int main(int argc, char **argv) {
     rl_catch_signals = 0;
     
     while (rclcpp::ok()) {
-        // --- FIX 2 & 3: readline automatically handles ANSI codes, arrow keys, and Ctrl+C crashes ---
         char* input = readline("\n[DISPATCHER] > ");
         
-        // Safely catch Ctrl+C or Ctrl+D (EOF) to prevent infinite spam
         if (!input) {
             sigintHandler(0); 
         }
 
         std::string line(input);
         
-        // Add the typed command to the up-arrow history
         if (!line.empty()) {
             add_history(input); 
         }
         
-        // Prevent memory leaks from readline allocation
         free(input); 
 
         if (line.empty()) continue;
 
-        // Parse user input
         std::istringstream iss(line);
         std::string command, argument;
         iss >> command;
         
-        // Grab everything after the command to feed both 'name' and 'value' directly into cmdParam
         std::getline(iss >> std::ws, argument);
 
-        // Route to the appropriate command function
         if (command == "help") {
             cmdHelp(argument);
         } else if (command == "taxi") {
@@ -400,8 +385,6 @@ int main(int argc, char **argv) {
     }
 
     rclcpp::shutdown();
-    
-    // Safely collapse the background network thread before exiting
     spin_thread.join(); 
     return 0;
 }

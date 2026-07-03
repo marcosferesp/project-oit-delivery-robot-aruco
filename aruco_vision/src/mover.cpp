@@ -66,6 +66,7 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);       // Broadcast velocity commands to the hardware motors
     db_pub_ = this->create_publisher<std_msgs::msg::Int32MultiArray>("/active_db", 10); // Broadcasts the active route database to the Dispatcher terminal
     telem_pub_ = this->create_publisher<std_msgs::msg::String>("/telem", 10);
+    db_str_pub_ = this->create_publisher<std_msgs::msg::String>("/active_db_str", 10);
 
     // --- Subscribers ---
     aruco_sub_ = this->create_subscription<geometry_msgs::msg::Quaternion>(
@@ -74,16 +75,32 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
         "/cmd_taxi", 10, std::bind(&ArucoFollowerNode::taxiCallback, this, std::placeholders::_1));             // Listens for destination commands from the Dispatcher
     pkg_sub_ = this->create_subscription<std_msgs::msg::Bool>(
         "/pkg_status", 10, std::bind(&ArucoFollowerNode::pkgCallback, this, std::placeholders::_1));            // Listens for package retrieval signals
+
+    // Listens for the Dispatcher's boolean trigger. If true, it beams the arrays exactly once.
     db_list_sub_ = this->create_subscription<std_msgs::msg::Bool>(
         "/req_db", 10,
-        [this](const std_msgs::msg::Bool::SharedPtr msg) {                                                      // Listens for the Dispatcher's boolean trigger. If true, it beams the array exactly once.
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {
             if (msg->data == true) {
+                // 1. Send the raw array for validation
                 auto db_msg = std_msgs::msg::Int32MultiArray();
                 for (size_t i = 0; i < route.size(); i++) {
                     db_msg.data.push_back(route[i].aruco_id);
                 }
                 db_pub_->publish(db_msg);
-                RCLCPP_INFO(this->get_logger(), "\033[1;35m[NETWORK] Database requested by Dispatcher. Broadcasted.\033[0m");
+                
+                // 2. Send the formatted string for "status db"
+                std::string db_str = "";
+                for (size_t i = 0; i < route.size(); i++) {
+                    char buffer[256];
+                    snprintf(buffer, sizeof(buffer), "Index [%zu] -> ID: %2d | Dest: %c | Dist: %.1f | Timeout: %4.1fs | Next ID: %2d\n",
+                        i, route[i].aruco_id, route[i].is_destination ? 'Y':'N', route[i].dist_to_next, route[i].search_timeout, route[i].next_id);
+                    db_str += buffer;
+                }
+                auto db_str_msg = std_msgs::msg::String();
+                db_str_msg.data = db_str;
+                db_str_pub_->publish(db_str_msg);
+                
+                RCLCPP_INFO(this->get_logger(), "[NETWORK] Database requested by Dispatcher. Broadcasted.");
             }
         }
     );
@@ -673,6 +690,17 @@ void ArucoFollowerNode::ctrlLoop() {
 //         state_str[rs], target_id, active_route.is_destination ? 'T' : 'F', aruco_visible ? 'Y' : 'N', error_x, error_y, error_angle, message.linear.x, message.angular.z);
 // // #endif // DEBUG_COMMENTS
 
+    std::string q_str = "";
+    if (rteQue.empty()) {
+        q_str = "No elements";
+    } else {
+        std::queue<int> temp_q = rteQue;
+        while (!temp_q.empty()) {
+            q_str += std::to_string(temp_q.front()) + " ";
+            temp_q.pop();
+        }
+    }
+
     // Live telemetry broadcast to dispatcher
     auto tel_msg = std_msgs::msg::String();
     tel_msg.data = std::to_string(rs) + "," + std::to_string(target_id) + "," + 
@@ -683,7 +711,8 @@ void ArucoFollowerNode::ctrlLoop() {
                    std::to_string(error_angle) + "," + 
                    std::to_string(message.linear.x) + "," + std::to_string(message.angular.z) + "," +
                    std::to_string(rteQue.size()) + "," +
-                   (pkg_taken ? "1" : "0");
+                   (pkg_taken ? "1" : "0") + "," +
+                   q_str;
     telem_pub_->publish(tel_msg);
     
     cmd_pub_->publish(message);

@@ -61,6 +61,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr db_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr telem_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr db_str_pub_;
 
     // --- Subscribers ---
     rclcpp::Subscription<geometry_msgs::msg::Quaternion>::SharedPtr aruco_sub_;
