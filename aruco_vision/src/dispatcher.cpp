@@ -283,6 +283,52 @@ void cmdStatus(const std::string& arg) {
 }
 
 /*
+ * Function setupWebIntegration
+ * Creates and returns the subscription to the /mission topic for web commands.
+ * Validates incoming web IDs against the active database before dispatching.
+ */
+rclcpp::Subscription<std_msgs::msg::String>::SharedPtr setupWebIntegration(
+    rclcpp::Node::SharedPtr node,
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr taxi_pub,
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr db_req_pub) 
+{
+    return node->create_subscription<std_msgs::msg::String>(
+        "/mission", 10,
+        [taxi_pub, db_req_pub](const std_msgs::msg::String::SharedPtr msg) {
+            std::cout << "\n[WEB SERVER] Received target ID: " << msg->data << " from HTML interface.\n";
+            
+            // Safety Check: Is the database loaded?
+            if (valid_ids.empty()) {
+                std::cout << "\033[1;33m[WARNING] Database empty! Requesting sync. Please resend the mission from the web in a second.\033[0m\n";
+                auto list_msg = std_msgs::msg::Bool();
+                list_msg.data = true;
+                db_req_pub->publish(list_msg);
+                std::cout << "[DISPATCHER] > " << std::flush;
+                return;
+            }
+
+            // Convert and Validate
+            try {
+                int target_id = std::stoi(msg->data);
+                
+                if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
+                    auto cmd_msg = std_msgs::msg::Int32();
+                    cmd_msg.data = target_id;
+                    taxi_pub->publish(cmd_msg);
+                    std::cout << "\033[1;32m[VALIDATED] ID " << target_id << " exists in database. Added to queue.\033[0m\n";
+                } else {
+                    std::cout << "\033[1;31m[REJECTED] ID " << target_id << " does not exist in the active database. Ignoring.\033[0m\n";
+                }
+            } catch (...) {
+                std::cout << "\033[1;31m[ERROR] Received invalid data format from web: " << msg->data << "\033[0m\n";
+            }
+            
+            std::cout << "[DISPATCHER] > " << std::flush;
+        }
+    );
+}
+
+/*
  * Main
  */
 int main(int argc, char **argv) {
@@ -323,12 +369,7 @@ int main(int argc, char **argv) {
     );
 
     // Web Server Integration
-    auto mission_sub = node->create_subscription<std_msgs::msg::String>(
-        "/mission", 10,
-        [](const std_msgs::msg::String::SharedPtr msg) {
-            std::cout << "\n[WEB SERVER] Received target ID: " << msg->data << " from HTML interface.\n[DISPATCHER] > " << std::flush;
-        }
-    );
+    auto mission_sub = setupWebIntegration(node, taxi_pub, db_req_pub);
 
     std::thread spin_thread([node]() {
         rclcpp::spin(node);
@@ -353,6 +394,14 @@ int main(int argc, char **argv) {
         " Waiting for user input...\n");
 
     rl_catch_signals = 0;
+
+    // Auto-Fetch Database
+    std::thread([db_req_pub]() {
+        std::this_thread::sleep_for(std::chrono::seconds(1)); 
+        auto list_msg = std_msgs::msg::Bool();
+        list_msg.data = true;
+        db_req_pub->publish(list_msg);
+    }).detach();
     
     while (rclcpp::ok()) {
         char* input = readline("\n[DISPATCHER] > ");
