@@ -20,7 +20,6 @@ std::string current_robot_pos = "UNKNOWN (Requires Telemetry Node)";
 std::vector<int> valid_ids;
 std::string latest_telemetry = "";
 std::string latest_db_str = "";
-int pending_web_mission = -1;
 
 // --- POSIX SIGNAL HANDLER ---
 void sigintHandler(int signum) {
@@ -95,7 +94,7 @@ void cmdHelp(const std::string& arg) {
  * Function cmdTaxi
  * Dispatches a destination via the /cmd_taxi topic
  */
-void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub, rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr list_pub, rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pkg_pub, rclcpp::Logger logger) {
+void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub, rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr list_pub, rclcpp::Logger logger) {
     if (arg.empty()) {
         std::cout << "\033[1;31m[ERROR] Missing argument. Use 'taxi list' or 'taxi <number>'.\033[0m\n";
         return;
@@ -124,14 +123,6 @@ void cmdTaxi(const std::string& arg, rclcpp::Publisher<std_msgs::msg::Int32>::Sh
             msg.data = target_id;
             pub->publish(msg);
             RCLCPP_INFO(logger, "Dispatched ID %d to the network.", target_id);
-
-            // <-- NEW: Auto-Set Package to TRUE for the Video Demo
-            current_pkg_status = true;
-            auto pkg_msg = std_msgs::msg::Bool();
-            pkg_msg.data = true;
-            pkg_pub->publish(pkg_msg);
-            std::cout << "\033[1;32m[DEMO MODE] Package automatically set to TRUE.\033[0m\n";
-
         } else {
             std::cout << "\033[1;31m[ERROR] ID " << target_id << " is not in the active database.\033[0m\n";
         }
@@ -295,51 +286,42 @@ void cmdStatus(const std::string& arg) {
 /*
  * Function setupWebIntegration
  * Creates and returns the subscription to the /mission topic for web commands.
+ * Validates incoming web IDs against the active database before dispatching.
  */
 rclcpp::Subscription<std_msgs::msg::String>::SharedPtr setupWebIntegration(
     rclcpp::Node::SharedPtr node,
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr taxi_pub,
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr db_req_pub,
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pkg_pub) 
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr db_req_pub) 
 {
     return node->create_subscription<std_msgs::msg::String>(
         "/mission", 10,
-        [taxi_pub, db_req_pub, pkg_pub](const std_msgs::msg::String::SharedPtr msg) {
+        [taxi_pub, db_req_pub](const std_msgs::msg::String::SharedPtr msg) {
             std::cout << "\n[WEB SERVER] Received target ID: " << msg->data << " from HTML interface.\n";
             
-            int target_id;
-            try {
-                target_id = std::stoi(msg->data);
-            } catch (...) {
-                std::cout << "\033[1;31m[ERROR] Received invalid data format from web: " << msg->data << "\033[0m\n";
+            // Safety Check: Is the database loaded?
+            if (valid_ids.empty()) {
+                std::cout << "\033[1;33m[WARNING] Database empty! Requesting sync. Please resend the mission from the web in a second.\033[0m\n";
+                auto list_msg = std_msgs::msg::Bool();
+                list_msg.data = true;
+                db_req_pub->publish(list_msg);
                 std::cout << "[DISPATCHER] > " << std::flush;
                 return;
             }
 
-            if (valid_ids.empty()) {
-                std::cout << "\033[1;33m[WARNING] Database empty! Buffering ID " << target_id << " and requesting sync...\033[0m\n";
-                pending_web_mission = target_id;
-                auto list_msg = std_msgs::msg::Bool();
-                list_msg.data = true;
-                db_req_pub->publish(list_msg);
-                return; 
-            }
-
-            if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
-                auto cmd_msg = std_msgs::msg::Int32();
-                cmd_msg.data = target_id;
-                taxi_pub->publish(cmd_msg);
+            // Convert and Validate
+            try {
+                int target_id = std::stoi(msg->data);
                 
-                // <-- NEW: Auto-Set Package to TRUE for the Video Demo
-                current_pkg_status = true;
-                auto pkg_msg = std_msgs::msg::Bool();
-                pkg_msg.data = true;
-                pkg_pub->publish(pkg_msg);
-
-                std::cout << "\033[1;32m[VALIDATED] ID " << target_id << " exists in database. Added to queue.\033[0m\n";
-                std::cout << "\033[1;32m[DEMO MODE] Package automatically set to TRUE.\033[0m\n";
-            } else {
-                std::cout << "\033[1;31m[REJECTED] ID " << target_id << " does not exist in the active database. Ignoring.\033[0m\n";
+                if (std::find(valid_ids.begin(), valid_ids.end(), target_id) != valid_ids.end()) {
+                    auto cmd_msg = std_msgs::msg::Int32();
+                    cmd_msg.data = target_id;
+                    taxi_pub->publish(cmd_msg);
+                    std::cout << "\033[1;32m[VALIDATED] ID " << target_id << " exists in database. Added to queue.\033[0m\n";
+                } else {
+                    std::cout << "\033[1;31m[REJECTED] ID " << target_id << " does not exist in the active database. Ignoring.\033[0m\n";
+                }
+            } catch (...) {
+                std::cout << "\033[1;31m[ERROR] Received invalid data format from web: " << msg->data << "\033[0m\n";
             }
             
             std::cout << "[DISPATCHER] > " << std::flush;
@@ -365,32 +347,11 @@ int main(int argc, char **argv) {
     
     auto db_sub = node->create_subscription<std_msgs::msg::Int32MultiArray>(
         "/active_db", 10,
-        [taxi_pub, pkg_pub](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
+        [](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
             valid_ids = msg->data;
             std::cout << "\n[SYSTEM] Available Destinations: [ ";
             for (int id : valid_ids) std::cout << id << " ";
-            std::cout << "]\n";
-
-            if (pending_web_mission != -1) {
-                if (std::find(valid_ids.begin(), valid_ids.end(), pending_web_mission) != valid_ids.end()) {
-                    auto cmd_msg = std_msgs::msg::Int32();
-                    cmd_msg.data = pending_web_mission;
-                    taxi_pub->publish(cmd_msg);
-                    
-                    // <-- NEW: Auto-Set Package to TRUE for the Video Demo
-                    current_pkg_status = true;
-                    auto pkg_msg = std_msgs::msg::Bool();
-                    pkg_msg.data = true;
-                    pkg_pub->publish(pkg_msg);
-
-                    std::cout << "\033[1;32m[VALIDATED] Buffered ID " << pending_web_mission << " exists in database. Added to queue.\033[0m\n";
-                    std::cout << "\033[1;32m[DEMO MODE] Package automatically set to TRUE.\033[0m\n";
-                } else {
-                    std::cout << "\033[1;31m[REJECTED] Buffered ID " << pending_web_mission << " does not exist in the active database. Ignoring.\033[0m\n";
-                }
-                pending_web_mission = -1; 
-            }
-            std::cout << "[DISPATCHER] > " << std::flush;
+            std::cout << "]\n[DISPATCHER] > " << std::flush;
         }
     );
 
@@ -409,7 +370,7 @@ int main(int argc, char **argv) {
     );
 
     // Web Server Integration
-    auto mission_sub = setupWebIntegration(node, taxi_pub, db_req_pub, pkg_pub);
+    auto mission_sub = setupWebIntegration(node, taxi_pub, db_req_pub);
 
     std::thread spin_thread([node]() {
         rclcpp::spin(node);
@@ -469,7 +430,7 @@ int main(int argc, char **argv) {
         if (command == "help") {
             cmdHelp(argument);
         } else if (command == "taxi") {
-            cmdTaxi(argument, taxi_pub, db_req_pub, pkg_pub, node->get_logger());
+            cmdTaxi(argument, taxi_pub, db_req_pub, node->get_logger());
         } else if (command == "pkg") {
             cmdPkg(argument, pkg_pub);
         } else if (command == "param") {
