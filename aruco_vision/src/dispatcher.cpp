@@ -29,6 +29,11 @@ void sigintHandler(int signum) {
     exit(signum); 
 }
 
+// --- ULTRASONIC & HARDWARE STATE ---
+float dist1 = -1.0, dist2 = -1.0, dist3 = -1.0;
+int door = -1;
+bool obstacle = false;
+
 /*
  * Function cmdHelp
  * Prints the formatted UI menus and parameter dictionaries
@@ -80,11 +85,12 @@ void cmdHelp(const std::string& arg) {
         std::cout << "  depdelay : Safety departure countdown (sec)\n";
     } else if (arg == "status") {
         std::cout << "Objective : Displays the live, real-time telemetry from the robot's control loop.\n";
-        std::cout << "  status       : Displays global state and math calculations\n";
-        std::cout << "  status robot : Displays only the physical state and target info\n";
-        std::cout << "  status math  : Displays only the PID errors and angles\n";
-        std::cout << "  status db    : Displays the fully formatted route database\n";
-        std::cout << "  status queue : Displays the current destinations waiting in the FIFO queue\n";
+        std::cout << "  status          : Displays global state and math calculations\n";
+        std::cout << "  status robot    : Displays only the physical state and target info\n";
+        std::cout << "  status math     : Displays only the PID errors and angles\n";
+        std::cout << "  status db       : Displays the fully formatted route database\n";
+        std::cout << "  status queue    : Displays the current destinations waiting in the FIFO queue\n";
+        std::cout << "  status sensors  : Displays live ultrasonic distances and door lock state\n";
     } else {
         std::cout << "\033[1;31m[ERROR] Unknown help argument.\033[0m\n";
     }
@@ -278,6 +284,14 @@ void cmdStatus(const std::string& arg) {
         std::cout << "  " << t[13] << "\n";
         std::cout << "---------------------\n";
     }
+    else if (arg == "sensors") {
+        std::cout << "\n--- LIVE SENSOR TELEMETRY ---\n";
+        std::cout << "  Sensor 1 (Left)   : " << (dist1 == -1.0 ? "No detection" : std::to_string(dist1) + " cm") << "\n";
+        std::cout << "  Sensor 2 (Center) : " << (dist2 == -1.0 ? "No detection" : std::to_string(dist2) + " cm") << "\n";
+        std::cout << "  Sensor 3 (Right)  : " << (dist3 == -1.0 ? "No detection" : std::to_string(dist3) + " cm") << "\n";
+        std::cout << "  Door Lock State   : " << (door == 1 ? "LOCKED" : (door == 0 ? "OPEN" : "UNKNOWN")) << "\n";
+        std::cout << "-----------------------------\n";
+    }
     else {
         std::cout << "\033[1;31m[ERROR] Unknown argument. Use 'status', 'status robot', 'status math', 'status db', or 'status queue'.\033[0m\n";
     }
@@ -366,6 +380,13 @@ int main(int argc, char **argv) {
         "/telem", 10,
         [](const std_msgs::msg::String::SharedPtr msg) {
             latest_telemetry = msg->data;
+        }
+    );
+
+    auto ultrasonic_sub = node->create_subscription<std_msgs::msg::String>(
+        "/ultrasonic_data", 10,
+        [](const std_msgs::msg::String::SharedPtr msg) {
+            sscanf(msg->data.c_str(), "%f,%f,%f,%d", &dist1, &dist2, &dist3, &door);
         }
     );
 
