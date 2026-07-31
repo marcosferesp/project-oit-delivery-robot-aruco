@@ -104,6 +104,9 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
             }
         }
     );
+
+    ultrasonic_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "/ultrasonic_data", 10, std::bind(&ArucoFollowerNode::ultrasonicCallback, this, std::placeholders::_1));
     
     // Trigger the main motor control loop at 10Hz
     timer_ = this->create_wall_timer(100ms, std::bind(&ArucoFollowerNode::ctrlLoop, this));
@@ -116,18 +119,28 @@ ArucoFollowerNode::ArucoFollowerNode(int16_t dest_id) : Node("aruco_follower_nod
     pkg_taken = false;
     depart_to = false;
 
+    previous_rs = ROBOT_IDLE;
+    is_blocked = false;
+    history_index = 0;
+    history_filled = false;
+    for (int i = 0; i < 5; i++) {
+        left_history[i] = -1.0;
+        center_history[i] = -1.0;
+        right_history[i] = -1.0;
+    }
+
     time = this->now();
 
     // --- Route Database Init ---
-    // route.push_back({5, false, 2.0, 15.0,  3, false}); 
-    // route.push_back({3, false, 2.0, 15.0,  4, false}); 
-    // route.push_back({4, true,  0.0, 15.0, -1, false});
+    route.push_back({5, false, 2.0, 60.0,  3, false}); 
+    route.push_back({3, false, 2.0, 60.0,  4, false}); 
+    route.push_back({4, true,  0.0, 60.0, -1, false});
 
-    route.push_back({2, false, 2.0, 15.0,  0, false});
-    route.push_back({0, false, 4.0, 30.0,  1, false});
-    route.push_back({1, false, 1.5, 15.0,  6, false});
-    route.push_back({6, false, 4.0, 30.0,  7, false});
-    route.push_back({7, false, 1.5, 15.0,  0, false});
+    // route.push_back({2, false, 2.0, 60.0,  0, false});
+    // route.push_back({0, false, 4.0, 120.0,  1, false});
+    // route.push_back({1, false, 1.5, 60.0,  6, false});
+    // route.push_back({6, false, 4.0, 120.0,  7, false});
+    // route.push_back({7, false, 1.5, 60.0,  0, false});
 
     // Test Static Queue
     // rteQue.push(1);
@@ -408,6 +421,71 @@ void ArucoFollowerNode::setDest(int16_t dest_id) {
     }
 }
 
+/*
+ * Function ultrasonicCallback
+ * Implements a sliding window variance filter to ignore passing pedestrians
+ * and triggers a hysteresis lock for static obstacles.
+ */
+void ArucoFollowerNode::ultrasonicCallback(const std_msgs::msg::String::SharedPtr msg) {
+    float l_val, c_val, r_val;
+    int door_val;
+    sscanf(msg->data.c_str(), "%f,%f,%f,%d", &l_val, &c_val, &r_val, &door_val);
+
+    // Push newest values into the sliding window
+    left_history[history_index] = l_val;
+    center_history[history_index] = c_val;
+    right_history[history_index] = r_val;
+    
+    history_index++;
+    if (history_index >= 5) {
+        history_index = 0;
+        history_filled = true; // Buffer is full, math is now safe to execute
+    }
+
+    // Evaluate obstacle logic
+    if (history_filled) {
+        if (!is_blocked) {
+            // Helper lambda: Checks if a sensor detects a static object < 40cm
+            auto check_sensor = [](float current, float* history) {
+                if (current > 0.0 && current < 40.0) {
+                    float min_val = 999.0, max_val = -999.0;
+                    for (int i = 0; i < 5; i++) {
+                        if (history[i] < min_val) min_val = history[i];
+                        if (history[i] > max_val) max_val = history[i];
+                    }
+                    // If the object moved less than 2cm over 5 frames, it is static
+                    return ((max_val - min_val) <= 2.0); 
+                }
+                return false;
+            };
+
+            // Identify exactly which sensor triggered the stop
+            bool left_trig = check_sensor(l_val, left_history);
+            bool center_trig = check_sensor(c_val, center_history);
+            bool right_trig = check_sensor(r_val, right_history);
+
+            if (left_trig || center_trig || right_trig) {
+                is_blocked = true;
+                
+                // Prioritize center naming if multiple trigger at once
+                std::string trig_sensor = center_trig ? "CENTER" : (left_trig ? "LEFT" : "RIGHT");
+                
+                RCLCPP_WARN(this->get_logger(), "\033[1;31m[OBSTACLE] Static object on %s sensor (<40cm). Halting!\033[0m", trig_sensor.c_str());
+            }
+        } else {
+            // Hysteresis Release: Wait until ALL sensors clear > 45cm (or read -1.0)
+            auto is_clear = [](float val) {
+                return (val > 45.0 || val == -1.0);
+            };
+
+            if (is_clear(l_val) && is_clear(c_val) && is_clear(r_val)) {
+                is_blocked = false;
+                RCLCPP_INFO(this->get_logger(), "\033[1;32m[OBSTACLE] Path cleared (>45cm). Resuming route.\033[0m");
+            }
+        }
+    }
+}
+
 /* 
  * Function ctrlLoop
  * Evaluates the robot's current state and sends motor commands
@@ -470,6 +548,18 @@ void ArucoFollowerNode::ctrlLoop() {
         ready_to_move = ((std::abs(error_y) > uncertainty) || (std::abs(error_x) > uncertainty) || (std::abs(error_angle) > angle_unce));
         ready_to_park = false; 
         robot_drifted = ((std::abs(error_y) > hysteresis) || (std::abs(error_x) > hysteresis) || (std::abs(error_angle) > angle_hyst));
+    }
+
+    if (is_blocked && rs != ROBOT_OBSTACLE) {
+        previous_rs = rs;       // Save what the robot was doing
+        rs = ROBOT_OBSTACLE;    // Lock into emergency halt
+    } else if (!is_blocked && rs == ROBOT_OBSTACLE) {
+        rs = previous_rs;       // Restore the saved state
+        // Force-refresh all stopwatches to current time so the robot doesn't immediately time-out upon waking up.
+        time = now;
+        search_start_time = now;
+        wait_time = now;
+        depart_time = now;
     }
 
     switch (rs) {
@@ -647,6 +737,13 @@ void ArucoFollowerNode::ctrlLoop() {
         case ROBOT_SEARCH:
         {
             message.linear.x = speed_linear;
+            message.angular.z = 0.0;
+            break;
+        }
+
+        case ROBOT_OBSTACLE:
+        {
+            message.linear.x = 0.0;
             message.angular.z = 0.0;
             break;
         }

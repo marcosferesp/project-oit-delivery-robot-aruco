@@ -15,7 +15,7 @@ class SerialBridge(Node):
         
         try:
             # Connect to ESP32 with a comfortable 500ms timeout
-            self.ser = serial.Serial('/dev/ttyACM0', 115200, timeout=0.5)
+            self.ser = serial.Serial('/dev/ttyACM1', 115200, timeout=0.5)
             self.get_logger().info('Connected to ESP32 on /dev/ttyACM0 at 115200 baud')
             
             # Start a dedicated background thread strictly for reading serial

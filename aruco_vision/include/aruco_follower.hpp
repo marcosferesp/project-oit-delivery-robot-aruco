@@ -24,7 +24,8 @@ typedef enum {
     ROBOT_MOVE,
     ROBOT_PARK,
     ROBOT_SEARCH,
-    ROBOT_WAIT
+    ROBOT_WAIT,
+    ROBOT_OBSTACLE
 } robot_state_t;
 
 typedef struct {
@@ -56,6 +57,7 @@ private:
     void taxiCallback(const std_msgs::msg::Int32::SharedPtr msg);
     void pkgCallback(const std_msgs::msg::Bool::SharedPtr msg);
     rcl_interfaces::msg::SetParametersResult paramCallback(const std::vector<rclcpp::Parameter> &parameters);
+    void ultrasonicCallback(const std_msgs::msg::String::SharedPtr msg);
 
     // --- Publishers ---
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
@@ -68,6 +70,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr taxi_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pkg_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr db_list_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr ultrasonic_sub_;
 
     // --- Timers ---
     rclcpp::TimerBase::SharedPtr timer_;
@@ -101,6 +104,15 @@ private:
 
     // --- FIFO ---
     std::queue<int> rteQue;
+
+    // --- Obstacle Memory & Sliding Window ---
+    robot_state_t previous_rs;
+    bool is_blocked;
+    float left_history[5];
+    float center_history[5];
+    float right_history[5];
+    int history_index;
+    bool history_filled;
 };
 
 #endif //ARUCO_VISION__ARUCO_FOLLOWER_HPP_
