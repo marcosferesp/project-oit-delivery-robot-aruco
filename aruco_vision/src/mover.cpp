@@ -421,10 +421,14 @@ void ArucoFollowerNode::setDest(int16_t dest_id) {
     }
 }
 
+#define OBSTACLE_TRIGGER_DIST 80.0  // Distance (cm) to trigger the emergency stop
+#define OBSTACLE_RELEASE_DIST 85.0  // Distance (cm) required to clear the obstacle lock
+#define OBSTACLE_HIT_COUNT 2        // Number of frames required to confirm a solid object
+
 /*
  * Function ultrasonicCallback
  * Filters out 1-frame glitches (walking pedestrians) but securely halts 
- * the robot for solid objects based on a 2-hit confirmation.
+ * the robot for solid objects based on a multi-hit confirmation.
  */
 void ArucoFollowerNode::ultrasonicCallback(const std_msgs::msg::String::SharedPtr msg) {
     float l_val, c_val, r_val;
@@ -442,41 +446,43 @@ void ArucoFollowerNode::ultrasonicCallback(const std_msgs::msg::String::SharedPt
         history_filled = true; 
     }
 
-    // 2. Evaluate obstacle logic instantly (no waiting for buffer to fill)
-    if (!is_blocked) {
-        // Helper lambda: If current frame is < 40 AND at least one previous frame was < 40, STOP!
-        auto check_sensor = [](float current, float* history) {
-            if (current > 0.0 && current < 40.0) {
-                int hit_count = 0;
-                for (int i = 0; i < 5; i++) {
-                    if (history[i] > 0.0 && history[i] < 40.0) hit_count++;
+    // 2. Evaluate obstacle logic instantly
+    if (history_filled) {
+        if (!is_blocked) {
+            // Helper lambda: Evaluates against the global macros
+            auto check_sensor = [](float current, float* history) {
+                if (current > 0.0 && current < OBSTACLE_TRIGGER_DIST) {
+                    int hit_count = 0;
+                    for (int i = 0; i < 5; i++) {
+                        if (history[i] > 0.0 && history[i] < OBSTACLE_TRIGGER_DIST) hit_count++;
+                    }
+                    return (hit_count >= OBSTACLE_HIT_COUNT); 
                 }
-                // Requires 2 hits in memory to confirm a solid object (filters out a 1-frame walking leg)
-                return (hit_count >= 2); 
+                return false;
+            };
+
+            bool left_trig = check_sensor(l_val, left_history);
+            bool center_trig = check_sensor(c_val, center_history);
+            bool right_trig = check_sensor(r_val, right_history);
+
+            if (left_trig || center_trig || right_trig) {
+                is_blocked = true;
+                
+                std::string trig_sensor = center_trig ? "CENTER" : (left_trig ? "LEFT" : "RIGHT");
+                RCLCPP_WARN(this->get_logger(), "\033[1;31m[OBSTACLE] Static object on %s sensor (<%.1fcm). Halting!\033[0m", 
+                            trig_sensor.c_str(), OBSTACLE_TRIGGER_DIST);
             }
-            return false;
-        };
+        } else {
+            // Hysteresis Release: Wait until ALL sensors clear the release macro
+            auto is_clear = [](float val) {
+                return (val > OBSTACLE_RELEASE_DIST || val == -1.0);
+            };
 
-        bool left_trig = check_sensor(l_val, left_history);
-        bool center_trig = check_sensor(c_val, center_history);
-        bool right_trig = check_sensor(r_val, right_history);
-
-        if (left_trig || center_trig || right_trig) {
-            is_blocked = true;
-            
-            // Prioritize center naming if multiple trigger at once
-            std::string trig_sensor = center_trig ? "CENTER" : (left_trig ? "LEFT" : "RIGHT");
-            RCLCPP_WARN(this->get_logger(), "\033[1;31m[OBSTACLE] Static object on %s sensor (<40cm). Halting!\033[0m", trig_sensor.c_str());
-        }
-    } else {
-        // Hysteresis Release: Wait until ALL sensors clear > 45cm (or read -1.0)
-        auto is_clear = [](float val) {
-            return (val > 45.0 || val == -1.0);
-        };
-
-        if (is_clear(l_val) && is_clear(c_val) && is_clear(r_val)) {
-            is_blocked = false;
-            RCLCPP_INFO(this->get_logger(), "\033[1;32m[OBSTACLE] Path cleared (>45cm). Resuming route.\033[0m");
+            if (is_clear(l_val) && is_clear(c_val) && is_clear(r_val)) {
+                is_blocked = false;
+                RCLCPP_INFO(this->get_logger(), "\033[1;32m[OBSTACLE] Path cleared (>%.1fcm). Resuming route.\033[0m", 
+                            OBSTACLE_RELEASE_DIST);
+            }
         }
     }
 }
