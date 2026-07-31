@@ -423,15 +423,15 @@ void ArucoFollowerNode::setDest(int16_t dest_id) {
 
 /*
  * Function ultrasonicCallback
- * Implements a sliding window variance filter to ignore passing pedestrians
- * and triggers a hysteresis lock for static obstacles.
+ * Filters out 1-frame glitches (walking pedestrians) but securely halts 
+ * the robot for solid objects based on a 2-hit confirmation.
  */
 void ArucoFollowerNode::ultrasonicCallback(const std_msgs::msg::String::SharedPtr msg) {
     float l_val, c_val, r_val;
     int door_val;
     sscanf(msg->data.c_str(), "%f,%f,%f,%d", &l_val, &c_val, &r_val, &door_val);
 
-    // Push newest values into the sliding window
+    // 1. Push newest values into the sliding window
     left_history[history_index] = l_val;
     center_history[history_index] = c_val;
     right_history[history_index] = r_val;
@@ -439,49 +439,44 @@ void ArucoFollowerNode::ultrasonicCallback(const std_msgs::msg::String::SharedPt
     history_index++;
     if (history_index >= 5) {
         history_index = 0;
-        history_filled = true; // Buffer is full, math is now safe to execute
+        history_filled = true; 
     }
 
-    // Evaluate obstacle logic
-    if (history_filled) {
-        if (!is_blocked) {
-            // Helper lambda: Checks if a sensor detects a static object < 40cm
-            auto check_sensor = [](float current, float* history) {
-                if (current > 0.0 && current < 40.0) {
-                    float min_val = 999.0, max_val = -999.0;
-                    for (int i = 0; i < 5; i++) {
-                        if (history[i] < min_val) min_val = history[i];
-                        if (history[i] > max_val) max_val = history[i];
-                    }
-                    // If the object moved less than 2cm over 5 frames, it is static
-                    return ((max_val - min_val) <= 2.0); 
+    // 2. Evaluate obstacle logic instantly (no waiting for buffer to fill)
+    if (!is_blocked) {
+        // Helper lambda: If current frame is < 40 AND at least one previous frame was < 40, STOP!
+        auto check_sensor = [](float current, float* history) {
+            if (current > 0.0 && current < 40.0) {
+                int hit_count = 0;
+                for (int i = 0; i < 5; i++) {
+                    if (history[i] > 0.0 && history[i] < 40.0) hit_count++;
                 }
-                return false;
-            };
-
-            // Identify exactly which sensor triggered the stop
-            bool left_trig = check_sensor(l_val, left_history);
-            bool center_trig = check_sensor(c_val, center_history);
-            bool right_trig = check_sensor(r_val, right_history);
-
-            if (left_trig || center_trig || right_trig) {
-                is_blocked = true;
-                
-                // Prioritize center naming if multiple trigger at once
-                std::string trig_sensor = center_trig ? "CENTER" : (left_trig ? "LEFT" : "RIGHT");
-                
-                RCLCPP_WARN(this->get_logger(), "\033[1;31m[OBSTACLE] Static object on %s sensor (<40cm). Halting!\033[0m", trig_sensor.c_str());
+                // Requires 2 hits in memory to confirm a solid object (filters out a 1-frame walking leg)
+                return (hit_count >= 2); 
             }
-        } else {
-            // Hysteresis Release: Wait until ALL sensors clear > 45cm (or read -1.0)
-            auto is_clear = [](float val) {
-                return (val > 45.0 || val == -1.0);
-            };
+            return false;
+        };
 
-            if (is_clear(l_val) && is_clear(c_val) && is_clear(r_val)) {
-                is_blocked = false;
-                RCLCPP_INFO(this->get_logger(), "\033[1;32m[OBSTACLE] Path cleared (>45cm). Resuming route.\033[0m");
-            }
+        bool left_trig = check_sensor(l_val, left_history);
+        bool center_trig = check_sensor(c_val, center_history);
+        bool right_trig = check_sensor(r_val, right_history);
+
+        if (left_trig || center_trig || right_trig) {
+            is_blocked = true;
+            
+            // Prioritize center naming if multiple trigger at once
+            std::string trig_sensor = center_trig ? "CENTER" : (left_trig ? "LEFT" : "RIGHT");
+            RCLCPP_WARN(this->get_logger(), "\033[1;31m[OBSTACLE] Static object on %s sensor (<40cm). Halting!\033[0m", trig_sensor.c_str());
+        }
+    } else {
+        // Hysteresis Release: Wait until ALL sensors clear > 45cm (or read -1.0)
+        auto is_clear = [](float val) {
+            return (val > 45.0 || val == -1.0);
+        };
+
+        if (is_clear(l_val) && is_clear(c_val) && is_clear(r_val)) {
+            is_blocked = false;
+            RCLCPP_INFO(this->get_logger(), "\033[1;32m[OBSTACLE] Path cleared (>45cm). Resuming route.\033[0m");
         }
     }
 }
@@ -633,7 +628,7 @@ void ArucoFollowerNode::ctrlLoop() {
                 }
             } else {
                 if ((now - depart_time).seconds() > departure_delay) {
-                    int next_dest = 0; // Default Fallback
+                    int next_dest = 3; // Default Fallback
 
                     if (!rteQue.empty()) {
                         next_dest = rteQue.front();
